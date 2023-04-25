@@ -8,6 +8,7 @@ import (
 
 	"github.com/MakeNowJust/heredoc/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/types"
 	"github.com/rkennedy/nblog"
 	"golang.org/x/exp/slog"
 )
@@ -154,9 +155,74 @@ func TestAtomicOutput(t *testing.T) {
 }
 
 func TestConstantLevelFiltering(t *testing.T) {
-	// TODO Test constant level filter
+	t.Parallel()
+
+	levels := []struct {
+		slog.Level
+		Matcher types.GomegaMatcher
+	}{
+		{slog.LevelDebug, And(
+			ContainSubstring("<DEBUG>"),
+			ContainSubstring("<INFO>"),
+			ContainSubstring("<WARN>"),
+			ContainSubstring("<ERROR>"),
+		)},
+		{slog.LevelInfo, And(
+			Not(ContainSubstring("<DEBUG>")),
+			ContainSubstring("<INFO>"),
+			ContainSubstring("<WARN>"),
+			ContainSubstring("<ERROR>"),
+		)},
+		{slog.LevelWarn, And(
+			Not(ContainSubstring("<DEBUG>")),
+			Not(ContainSubstring("<INFO>")),
+			ContainSubstring("<WARN>"),
+			ContainSubstring("<ERROR>"),
+		)},
+		{slog.LevelError, And(
+			Not(ContainSubstring("<DEBUG>")),
+			Not(ContainSubstring("<INFO>")),
+			Not(ContainSubstring("<WARN>")),
+			ContainSubstring("<ERROR>"),
+		)},
+	}
+
+	for _, lev := range levels {
+		lev := lev
+
+		t.Run(lev.Level.String(), func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+			output := &strings.Builder{}
+			logger := slog.New(nblog.NewHandler(output, nblog.Level(lev.Level)))
+
+			logger.Debug("one")
+			logger.Info("two")
+			logger.Warn("three")
+			logger.Error("four")
+
+			g.Expect(output.String()).To(lev.Matcher)
+		})
+	}
 }
 
 func TestChangedLevelFiltering(t *testing.T) {
-	// TODO Test variable level filter
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &strings.Builder{}
+	var level slog.LevelVar
+	logger := slog.New(nblog.NewHandler(output, nblog.Level(&level)))
+
+	logger.Debug("hidden", slog.Int("line", 1))
+	logger.Info("shown", slog.Int("line", 2))
+	level.Set(slog.LevelDebug)
+	logger.Debug("shown", slog.Int("line", 3))
+	level.Set(slog.LevelError)
+	logger.Debug("hidden", slog.Int("line", 4))
+	logger.Info("hidden", slog.Int("line", 5))
+	logger.Warn("hidden", slog.Int("line", 6))
+	logger.Error("shown", slog.Int("line", 7))
+
+	g.Expect(output.String()).NotTo(ContainSubstring("hidden"))
 }

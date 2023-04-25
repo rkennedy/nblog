@@ -149,18 +149,18 @@ func getCaller(rec slog.Record, omitPackage bool) string {
 }
 
 func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
-	buffer := &strings.Builder{}
+	var timeString string
 	if !rec.Time.IsZero() {
 		format := h.TimestampFormat
 		if format == "" {
 			format = FullDateFormat
 		}
-		fmt.Fprintf(buffer, "%s ", rec.Time.Format(format))
+		timeString = fmt.Sprintf("%s ", rec.Time.Format(format))
 	}
 	who := getCaller(rec, !h.UseFullCallerName)
-	fmt.Fprintf(buffer, "[%d] <%s> %s: %s", os.Getpid(), rec.Level, who, rec.Message)
 
-	out := jsoniter.NewStream(jsoniter.ConfigDefault, buffer, 50)
+	attributeBuffer := &strings.Builder{}
+	out := jsoniter.NewStream(jsoniter.ConfigDefault, attributeBuffer, 50)
 	wroteSpace := false
 	firstField := true
 	rec.Attrs(func(attr slog.Attr) bool {
@@ -171,7 +171,7 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 		out.WriteObjectEnd()
 		out.Flush()
 	}
-	fmt.Fprintf(h.Destination, "%s\n", buffer.String())
+	fmt.Fprintf(h.Destination, "%s[%d] <%s> %s: %s%s\n", timeString, os.Getpid(), rec.Level, who, rec.Message, attributeBuffer.String())
 	return nil
 }
 

@@ -13,30 +13,63 @@ import (
 	"golang.org/x/exp/slog"
 )
 
-type Options struct {
-	Level slog.Leveler
-}
-
+// LegacyHandler is an implementation of [golang.org/x/exp/slog.Handler] that
+// mimics the format used by legacy NetBackup logging. Attributes, if present,
+// are appended to the line after the given message.
+//
+// If an attribute named “who” is present, it overrides the name of the
+// calling function.
 type LegacyHandler struct {
 	Destination io.Writer
 	Level       slog.Leveler
-	attrs       []slog.Attr
+	// TimestampFormat is the format (a la time.Time.Format) to use for
+	// timestamps at the start of each log record. If empty, the default
+	// used will be FullDateFormat. The classic NetBackup format is
+	// TimeOnlyFormat; use that if log rotation would make the repeated
+	// inclusion of the date redundant.
+	TimestampFormat string
+	attrs           []slog.Attr
 }
 
 var _ slog.Handler = &LegacyHandler{}
 
-func NewHandler(dest io.Writer, options Options) *LegacyHandler {
-	result := &LegacyHandler{
-		Destination: dest,
-		Level:       options.Level,
+type LegacyOption func(handler *LegacyHandler)
+
+func Level(level slog.Leveler) LegacyOption {
+	return func(handler *LegacyHandler) {
+		handler.Level = level
 	}
+}
+
+const (
+	FullDateFormat = time.DateTime + ".000"
+	TimeOnlyFormat = time.TimeOnly + ".000"
+)
+
+// TimestampFormat returns a LegacyOption callback that will configure a
+// handler to use the given time format for log timestamps. See
+// LegacyHandler.TimestampFormat.
+func TimestampFormat(format string) LegacyOption {
+	return func(handler *LegacyHandler) {
+		handler.TimestampFormat = format
+	}
+}
+
+func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
+	result := &LegacyHandler{
+		Destination:     dest,
+		Level:           slog.LevelInfo,
+		TimestampFormat: FullDateFormat,
+	}
+	for _, opt := range options {
+		opt(result)
+	}
+	return result
 }
 
 func (h *LegacyHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.Level.Level() <= level
 }
-
-const timestampFormat = time.DateTime + ".000"
 
 func nextField(wroteFirstSpace *bool, firstField *bool, out *jsoniter.Stream, key string) {
 	if wroteFirstSpace != nil && !*wroteFirstSpace {
@@ -91,7 +124,11 @@ func attrToJson(wroteFirstSpace *bool, firstField *bool, out *jsoniter.Stream, a
 
 func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	if !rec.Time.IsZero() {
-		fmt.Fprintf(h.Destination, "%s ", rec.Time.Format(timestampFormat))
+		format := h.TimestampFormat
+		if format == "" {
+			format = FullDateFormat
+		}
+		fmt.Fprintf(h.Destination, "%s ", rec.Time.Format(format))
 	}
 	frames := runtime.CallersFrames([]uintptr{rec.PC})
 	frame, _ := frames.Next()

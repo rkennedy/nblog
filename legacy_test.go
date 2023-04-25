@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	TimestampRegex = `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}`
-	PidRegex       = `\d+`
-	ThisPackage    = "github.com/rkennedy/nblog_test"
+	FullTimestampRegex = `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}`
+	TimeOnlyRegex      = `\d{2}:\d{2}:\d{2}\.\d{3}`
+	PidRegex           = `\d+`
+	ThisPackage        = "github.com/rkennedy/nblog_test"
 )
 
 func TestBasicLogFormat(t *testing.T) {
@@ -22,7 +23,7 @@ func TestBasicLogFormat(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &strings.Builder{}
-	h := nblog.NewHandler(output, nblog.Options{Level: slog.LevelDebug})
+	h := nblog.NewHandler(output, nblog.Level(slog.LevelDebug))
 	logger := slog.New(h)
 
 	logger.Debug("a message")
@@ -36,7 +37,7 @@ func TestBasicLogFormat(t *testing.T) {
 		%[1]s \[%[2]s\] <WARN> %[3]s: a message
 		%[1]s \[%[2]s\] <ERROR> %[3]s: a message
 		`),
-		TimestampRegex,
+		FullTimestampRegex,
 		PidRegex,
 		regexp.QuoteMeta(ThisPackage+".TestBasicLogFormat")))
 }
@@ -46,7 +47,7 @@ func TestAttributes(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &strings.Builder{}
-	h := nblog.NewHandler(output, nblog.Options{Level: slog.LevelDebug})
+	h := nblog.NewHandler(output, nblog.Level(slog.LevelDebug))
 	logger := slog.New(h)
 
 	logger.Debug("a message", "some attribute", "some value")
@@ -60,7 +61,7 @@ func TestAttributeGroups(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &strings.Builder{}
-	h := nblog.NewHandler(output, nblog.Options{Level: slog.LevelDebug})
+	h := nblog.NewHandler(output, nblog.Level(slog.LevelDebug))
 	logger := slog.New(h)
 
 	logger.Debug("a message", "some attribute", "some value",
@@ -69,6 +70,23 @@ func TestAttributeGroups(t *testing.T) {
 	attrs := strings.SplitN(output.String(), "a message", 2)[1]
 	g.Expect(attrs).To(Equal(` {"some attribute": "some value", "a group": {"an int": 5, "a bool": true}}
 `))
+}
+
+func TestTimestampFormat(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &strings.Builder{}
+	h := nblog.NewHandler(output, nblog.TimestampFormat(nblog.TimeOnlyFormat))
+	logger := slog.New(h)
+
+	logger.Info("a message")
+
+	g.Expect(output.String()).To(MatchRegexp(heredoc.Doc(`
+		^%[1]s \[.*a message
+		`),
+		TimeOnlyRegex,
+	))
 }
 
 func TestConstantLevelFiltering(t *testing.T) {

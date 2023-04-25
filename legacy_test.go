@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/MakeNowJust/heredoc/v2"
 	. "github.com/onsi/gomega"
@@ -70,6 +71,40 @@ func TestAttributeGroups(t *testing.T) {
 	attrs := strings.SplitN(output.String(), "a message", 2)[1]
 	g.Expect(attrs).To(Equal(` {"some attribute": "some value", "a group": {"an int": 5, "a bool": true}}
 `))
+}
+
+func TestAttributeTypes(t *testing.T) {
+	t.Parallel()
+
+	attrs := []struct {
+		slog.Attr
+		Expected string
+	}{
+		{slog.Bool("true", true), `"true": true`},
+		{slog.Bool("false", false), `"false": false`},
+		{slog.Duration("duration", 5*time.Minute), `"duration": "5m0s"`},
+		{slog.Float64("float64", 2.25), `"float64": 2.25`},
+		{slog.Int("int", 234), `"int": 234`},
+		{slog.Int64("int64", -5000000000), `"int64": -5000000000`},
+		{slog.String("string", "some value"), `"string": "some value"`},
+		{slog.Time("time", time.Date(2010, time.June, 4, 10, 34, 23, 14983, time.UTC)), `"time": "2010-06-04 10:34:23.000014983 +0000 UTC"`},
+		{slog.Uint64("uint64", 6000000000), `"uint64": 6000000000`},
+	}
+
+	for _, pair := range attrs {
+		pair := pair
+		t.Run(pair.Attr.Key, func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+
+			output := &strings.Builder{}
+			logger := slog.New(nblog.NewHandler(output))
+
+			logger.Info("A", pair.Attr)
+
+			g.Expect(output.String()).To(HaveSuffix("A {%s}\n", pair.Expected))
+		})
+	}
 }
 
 func TestTimestampFormat(t *testing.T) {

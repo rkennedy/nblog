@@ -105,10 +105,10 @@ func attrToJson(wroteFirstSpace *bool, firstField *bool, out *jsoniter.Stream, a
 		out.WriteBool(attr.Value.Bool())
 	case slog.KindDuration:
 		nextField(wroteFirstSpace, firstField, out, attr.Key)
-		// TODO attr.Value.Duration()
+		out.WriteString(attr.Value.Duration().String())
 	case slog.KindTime:
 		nextField(wroteFirstSpace, firstField, out, attr.Key)
-		// TODO attr.Value.Time()
+		out.WriteString(attr.Value.Time().String())
 	case slog.KindAny:
 		nextField(wroteFirstSpace, firstField, out, attr.Key)
 		out.WriteVal(attr.Value.Any())

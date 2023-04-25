@@ -17,22 +17,22 @@ type Options struct {
 	Level slog.Leveler
 }
 
-type Handler struct {
+type LegacyHandler struct {
 	Destination io.Writer
 	Level       slog.Leveler
 	attrs       []slog.Attr
 }
 
-var _ slog.Handler = &Handler{}
+var _ slog.Handler = &LegacyHandler{}
 
-func NewHandler(dest io.Writer, options Options) *Handler {
-	return &Handler{
+func NewHandler(dest io.Writer, options Options) *LegacyHandler {
+	result := &LegacyHandler{
 		Destination: dest,
 		Level:       options.Level,
 	}
 }
 
-func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
+func (h *LegacyHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.Level.Level() <= level
 }
 
@@ -89,7 +89,7 @@ func attrToJson(wroteFirstSpace *bool, firstField *bool, out *jsoniter.Stream, a
 	}
 }
 
-func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
+func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	if !rec.Time.IsZero() {
 		fmt.Fprintf(h.Destination, "%s ", rec.Time.Format(timestampFormat))
 	}
@@ -112,15 +112,15 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 	return nil
 }
 
-func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &Handler{
+func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &LegacyHandler{
 		Destination: h.Destination,
 		Level:       h.Level,
 		attrs:       append(h.attrs, attrs...),
 	}
 }
 
-func (h *Handler) WithGroup(name string) slog.Handler {
+func (h *LegacyHandler) WithGroup(name string) slog.Handler {
 	// TODO Implement log groups
 	return h
 }

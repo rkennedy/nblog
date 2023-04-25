@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
@@ -123,18 +124,19 @@ func attrToJson(wroteFirstSpace *bool, firstField *bool, out *jsoniter.Stream, a
 }
 
 func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
+	buffer := &strings.Builder{}
 	if !rec.Time.IsZero() {
 		format := h.TimestampFormat
 		if format == "" {
 			format = FullDateFormat
 		}
-		fmt.Fprintf(h.Destination, "%s ", rec.Time.Format(format))
+		fmt.Fprintf(buffer, "%s ", rec.Time.Format(format))
 	}
 	frames := runtime.CallersFrames([]uintptr{rec.PC})
 	frame, _ := frames.Next()
 	who := frame.Function
-	fmt.Fprintf(h.Destination, "[%d] <%s> %s: %s", os.Getpid(), rec.Level, who, rec.Message)
-	out := jsoniter.NewStream(jsoniter.ConfigDefault, h.Destination, 50)
+	fmt.Fprintf(buffer, "[%d] <%s> %s: %s", os.Getpid(), rec.Level, who, rec.Message)
+	out := jsoniter.NewStream(jsoniter.ConfigDefault, buffer, 50)
 	wroteSpace := false
 	firstField := true
 	rec.Attrs(func(attr slog.Attr) bool {
@@ -145,7 +147,7 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 		out.WriteObjectEnd()
 		out.Flush()
 	}
-	fmt.Fprint(h.Destination, "\n")
+	fmt.Fprintf(h.Destination, "%s\n", buffer.String())
 	return nil
 }
 

@@ -89,6 +89,35 @@ func TestTimestampFormat(t *testing.T) {
 	))
 }
 
+// MockWriter is a writer that discards its input and instead merely counts the
+// calls to its Write method.
+type MockWriter struct {
+	WriteCallCount uint
+}
+
+func (mw *MockWriter) Write(p []byte) (int, error) {
+	mw.WriteCallCount++
+	return len(p), nil
+}
+
+// TestAtomicOutput checks how many times the log handler writes to its output
+// buffer for each log message. It should be _once_ to support writers that
+// perform logic between calls to Write. For example, natefinch/lumberjack
+// checks the future log size before each call to Write, which could result in
+// a log message being split acros multiple files.
+func TestAtomicOutput(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &MockWriter{}
+	h := nblog.NewHandler(output)
+	logger := slog.New(h)
+
+	logger.Info("a message", slog.String("attr", "value"))
+	logger.Warn("another message")
+	g.Expect(output.WriteCallCount).To(Equal(uint(2)), "number of calls to Write")
+}
+
 func TestConstantLevelFiltering(t *testing.T) {
 	// TODO Test constant level filter
 }

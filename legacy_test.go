@@ -1,7 +1,6 @@
 package nblog_test
 
 import (
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +40,8 @@ func TestBasicLogFormat(t *testing.T) {
 		`),
 		FullTimestampRegex,
 		PidRegex,
-		regexp.QuoteMeta(ThisPackage+".TestBasicLogFormat")))
+		`[^:]*`,
+	))
 }
 
 func TestAttributes(t *testing.T) {
@@ -225,4 +225,34 @@ func TestChangedLevelFiltering(t *testing.T) {
 	logger.Error("shown", slog.Int("line", 7))
 
 	g.Expect(output.String()).NotTo(ContainSubstring("hidden"))
+}
+
+func TestOmitCallerPackage(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &strings.Builder{}
+	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(false)))
+
+	logger.Info("message")
+
+	g.Expect(output.String()).To(And(
+		Not(ContainSubstring(ThisPackage)),
+		ContainSubstring(" TestOmitCallerPackage:"),
+	))
+}
+
+func TestIncludeCallerPackage(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &strings.Builder{}
+	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(true)))
+
+	logger.Info("message")
+
+	g.Expect(output.String()).To(And(
+		ContainSubstring(ThisPackage),
+		ContainSubstring(".TestIncludeCallerPackage:"),
+	))
 }

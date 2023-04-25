@@ -28,8 +28,9 @@ type LegacyHandler struct {
 	// used will be FullDateFormat. The classic NetBackup format is
 	// TimeOnlyFormat; use that if log rotation would make the repeated
 	// inclusion of the date redundant.
-	TimestampFormat string
-	attrs           []slog.Attr
+	TimestampFormat   string
+	UseFullCallerName bool
+	attrs             []slog.Attr
 }
 
 var _ slog.Handler = &LegacyHandler{}
@@ -56,11 +57,22 @@ func TimestampFormat(format string) LegacyOption {
 	}
 }
 
+// UseFullCallerName returns a LegacyOption callback that will configure a
+// handler to include or omit the package-name portion of the caller in log
+// messages. The default is to omit the package, so only the function name will
+// appear.
+func UseFullCallerName(use bool) LegacyOption {
+	return func(handler *LegacyHandler) {
+		handler.UseFullCallerName = use
+	}
+}
+
 func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
 	result := &LegacyHandler{
-		Destination:     dest,
-		Level:           slog.LevelInfo,
-		TimestampFormat: FullDateFormat,
+		Destination:       dest,
+		Level:             slog.LevelInfo,
+		TimestampFormat:   FullDateFormat,
+		UseFullCallerName: false,
 	}
 	for _, opt := range options {
 		opt(result)
@@ -123,6 +135,19 @@ func attrToJson(wroteFirstSpace *bool, firstField *bool, out *jsoniter.Stream, a
 	}
 }
 
+func getCaller(rec slog.Record, omitPackage bool) string {
+	frames := runtime.CallersFrames([]uintptr{rec.PC})
+	frame, _ := frames.Next()
+	who := frame.Function
+	if omitPackage {
+		lastDot := strings.LastIndex(who, ".")
+		if lastDot >= 0 {
+			who = who[lastDot+1:]
+		}
+	}
+	return who
+}
+
 func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	buffer := &strings.Builder{}
 	if !rec.Time.IsZero() {
@@ -132,10 +157,9 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 		}
 		fmt.Fprintf(buffer, "%s ", rec.Time.Format(format))
 	}
-	frames := runtime.CallersFrames([]uintptr{rec.PC})
-	frame, _ := frames.Next()
-	who := frame.Function
+	who := getCaller(rec, !h.UseFullCallerName)
 	fmt.Fprintf(buffer, "[%d] <%s> %s: %s", os.Getpid(), rec.Level, who, rec.Message)
+
 	out := jsoniter.NewStream(jsoniter.ConfigDefault, buffer, 50)
 	wroteSpace := false
 	firstField := true

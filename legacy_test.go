@@ -256,3 +256,38 @@ func TestIncludeCallerPackage(t *testing.T) {
 		ContainSubstring(".TestIncludeCallerPackage:"),
 	))
 }
+
+func TestOverrideCallerNameImmediate(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &strings.Builder{}
+	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(true)))
+
+	logger.Info("message", slog.String("who", "override"))
+
+	g.Expect(output.String()).To(And(
+		Not(ContainSubstring(ThisPackage)),
+		Not(ContainSubstring(".TestOverrideCallerNameImmediate:")),
+		ContainSubstring(" override: "),
+		Not(ContainSubstring(`"who": "override"`)),
+	))
+}
+
+func TestOverrideCallerNameWith(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &strings.Builder{}
+	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(true)))
+
+	logger = logger.With("who", "override")
+	logger.Info("message")
+
+	g.Expect(output.String()).To(And(
+		Not(ContainSubstring(ThisPackage)),
+		Not(ContainSubstring(".TestOverrideCallerNameWith:")),
+		ContainSubstring(" override: "),
+		Not(ContainSubstring(`"who": "override"`)),
+	))
+}

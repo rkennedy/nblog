@@ -10,6 +10,7 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/rkennedy/optional"
 
 	"golang.org/x/exp/slog"
 )
@@ -28,7 +29,7 @@ type LegacyHandler struct {
 	// used will be FullDateFormat. The classic NetBackup format is
 	// TimeOnlyFormat; use that if log rotation would make the repeated
 	// inclusion of the date redundant.
-	TimestampFormat   string
+	TimestampFormat   optional.Value[string]
 	UseFullCallerName bool
 	attrs             []slog.Attr
 }
@@ -53,7 +54,7 @@ const (
 // LegacyHandler.TimestampFormat.
 func TimestampFormat(format string) LegacyOption {
 	return func(handler *LegacyHandler) {
-		handler.TimestampFormat = format
+		handler.TimestampFormat = optional.New(format)
 	}
 }
 
@@ -71,7 +72,6 @@ func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
 	result := &LegacyHandler{
 		Destination:       dest,
 		Level:             slog.LevelInfo,
-		TimestampFormat:   FullDateFormat,
 		UseFullCallerName: false,
 	}
 	for _, opt := range options {
@@ -151,27 +151,41 @@ func getCaller(rec slog.Record, omitPackage bool) string {
 func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	var timeString string
 	if !rec.Time.IsZero() {
-		format := h.TimestampFormat
-		if format == "" {
-			format = FullDateFormat
-		}
+		format := h.TimestampFormat.OrElse(FullDateFormat)
 		timeString = fmt.Sprintf("%s ", rec.Time.Format(format))
 	}
-	who := getCaller(rec, !h.UseFullCallerName)
 
 	attributeBuffer := &strings.Builder{}
 	out := jsoniter.NewStream(jsoniter.ConfigDefault, attributeBuffer, 50)
 	wroteSpace := false
 	firstField := true
-	rec.Attrs(func(attr slog.Attr) bool {
-		attrToJson(&wroteSpace, &firstField, out, attr)
+	var who optional.Value[string]
+
+	processAttr := func(attr slog.Attr) bool {
+		if attr.Key == "who" {
+			who = optional.New(attr.Value.String())
+		} else {
+			attrToJson(&wroteSpace, &firstField, out, attr)
+		}
 		return true
-	})
+	}
+	for _, attr := range h.attrs {
+		processAttr(attr)
+	}
+	rec.Attrs(processAttr)
 	if wroteSpace {
 		out.WriteObjectEnd()
 		out.Flush()
 	}
-	fmt.Fprintf(h.Destination, "%s[%d] <%s> %s: %s%s\n", timeString, os.Getpid(), rec.Level, who, rec.Message, attributeBuffer.String())
+
+	fmt.Fprintf(h.Destination, "%s[%d] <%s> %s: %s%s\n",
+		timeString,
+		os.Getpid(),
+		rec.Level,
+		who.OrElseGet(func() string { return getCaller(rec, !h.UseFullCallerName) }),
+		rec.Message,
+		attributeBuffer.String(),
+	)
 	return nil
 }
 

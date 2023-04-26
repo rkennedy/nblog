@@ -22,25 +22,25 @@ import (
 // If an attribute named “who” is present, it overrides the name of the
 // calling function.
 type LegacyHandler struct {
-	Destination io.Writer
-	Level       slog.Leveler
-	// TimestampFormat is the format (a la time.Time.Format) to use for
-	// timestamps at the start of each log record. If empty, the default
-	// used will be FullDateFormat. The classic NetBackup format is
-	// TimeOnlyFormat; use that if log rotation would make the repeated
-	// inclusion of the date redundant.
-	TimestampFormat   optional.Value[string]
-	UseFullCallerName bool
+	destination       io.Writer
+	level             slog.Leveler
+	timestampFormat   optional.Value[string]
+	useFullCallerName bool
 	attrs             []slog.Attr
 }
 
 var _ slog.Handler = &LegacyHandler{}
 
+// LegacyOption is a function that applies options to a new [LegacyHandler].
+// Pass instances of this function to [NewHandler]. Use functions like
+// [TimestampFormat] to generate callbacks to apply variable values.
 type LegacyOption func(handler *LegacyHandler)
 
+// Level returns a LegacyOption callback that will configure a handler to
+// filter messages with a level lower than the given level.
 func Level(level slog.Leveler) LegacyOption {
 	return func(handler *LegacyHandler) {
-		handler.Level = level
+		handler.level = level
 	}
 }
 
@@ -50,11 +50,14 @@ const (
 )
 
 // TimestampFormat returns a LegacyOption callback that will configure a
-// handler to use the given time format for log timestamps. See
-// LegacyHandler.TimestampFormat.
+// handler to use the given time format (a la [time.Time.Format]) for log
+// timestamps at the start of each record. If left unset, the default used will
+// be [FullDateFormat]. The classic NetBackup format is [TimeOnlyFormat]; use
+// that if log rotation would make the repeated inclusion of the date
+// redundant.
 func TimestampFormat(format string) LegacyOption {
 	return func(handler *LegacyHandler) {
-		handler.TimestampFormat = optional.New(format)
+		handler.timestampFormat = optional.New(format)
 	}
 }
 
@@ -64,15 +67,15 @@ func TimestampFormat(format string) LegacyOption {
 // appear.
 func UseFullCallerName(use bool) LegacyOption {
 	return func(handler *LegacyHandler) {
-		handler.UseFullCallerName = use
+		handler.useFullCallerName = use
 	}
 }
 
 func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
 	result := &LegacyHandler{
-		Destination:       dest,
-		Level:             slog.LevelInfo,
-		UseFullCallerName: false,
+		destination:       dest,
+		level:             slog.LevelInfo,
+		useFullCallerName: false,
 	}
 	for _, opt := range options {
 		opt(result)
@@ -81,7 +84,7 @@ func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
 }
 
 func (h *LegacyHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.Level.Level() <= level
+	return h.level.Level() <= level
 }
 
 func nextField(wroteFirstSpace *bool, firstField *bool, out *jsoniter.Stream, key string) {
@@ -151,7 +154,7 @@ func getCaller(rec slog.Record, omitPackage bool) string {
 func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	var timeString string
 	if !rec.Time.IsZero() {
-		format := h.TimestampFormat.OrElse(FullDateFormat)
+		format := h.timestampFormat.OrElse(FullDateFormat)
 		timeString = fmt.Sprintf("%s ", rec.Time.Format(format))
 	}
 
@@ -178,11 +181,11 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 		out.Flush()
 	}
 
-	fmt.Fprintf(h.Destination, "%s[%d] <%s> %s: %s%s\n",
+	fmt.Fprintf(h.destination, "%s[%d] <%s> %s: %s%s\n",
 		timeString,
 		os.Getpid(),
 		rec.Level,
-		who.OrElseGet(func() string { return getCaller(rec, !h.UseFullCallerName) }),
+		who.OrElseGet(func() string { return getCaller(rec, !h.useFullCallerName) }),
 		rec.Message,
 		attributeBuffer.String(),
 	)
@@ -191,8 +194,8 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 
 func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &LegacyHandler{
-		Destination: h.Destination,
-		Level:       h.Level,
+		destination: h.destination,
+		level:       h.level,
 		attrs:       append(h.attrs, attrs...),
 	}
 }

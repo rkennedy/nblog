@@ -1,13 +1,13 @@
 package nblog_test
 
 import (
+	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/MakeNowJust/heredoc/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/types"
 	"github.com/rkennedy/nblog"
 	"golang.org/x/exp/slog"
 )
@@ -18,6 +18,49 @@ const (
 	PidRegex           = `\d+`
 	ThisPackage        = "github.com/rkennedy/nblog_test"
 )
+
+// MockWriter is a writer that discards its input and instead merely counts the
+// calls to its Write method.
+type MockWriter struct {
+	WriteCallCount uint
+}
+
+func (mw *MockWriter) Write(p []byte) (int, error) {
+	mw.WriteCallCount++
+	return len(p), nil
+}
+
+// TestAtomicOutput checks how many times the log handler writes to its output
+// buffer for each log message. It should be _once_ to support writers that
+// perform logic between calls to Write. For example, natefinch/lumberjack
+// checks the future log size before each call to Write, which could result in
+// a log message being split acros multiple files.
+//
+// Subsequent tests using the [LineBuffer] implementation of [io.Writer] rely
+// on this atomic behavior to inspect the output.
+func TestAtomicOutput(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &MockWriter{}
+	h := nblog.NewHandler(output)
+	logger := slog.New(h)
+
+	logger.Info("a message", slog.String("attr", "value"))
+	logger.Warn("another message")
+	g.Expect(output.WriteCallCount).To(Equal(uint(2)), "number of calls to Write")
+}
+
+type LineBuffer struct {
+	Lines []string
+}
+
+var _ io.Writer = &LineBuffer{}
+
+func (lb *LineBuffer) Write(b []byte) (int, error) {
+	lb.Lines = append(lb.Lines, strings.TrimSuffix(string(b), "\n"))
+	return len(b), nil
+}
 
 func TestBasicLogFormat(t *testing.T) {
 	t.Parallel()
@@ -48,30 +91,27 @@ func TestAttributes(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	output := &strings.Builder{}
-	h := nblog.NewHandler(output, nblog.Level(slog.LevelDebug))
-	logger := slog.New(h)
+	output := &LineBuffer{}
+	logger := slog.New(nblog.NewHandler(output))
 
-	logger.Debug("a message", "some attribute", "some value")
+	logger.Info("a message", "some attribute", "some value")
 
-	attrs := strings.SplitN(output.String(), "a message", 2)[1]
-	g.Expect(attrs).To(Equal(" {\"some attribute\": \"some value\"}\n"))
+	attrs := strings.SplitN(output.Lines[0], "a message", 2)[1]
+	g.Expect(attrs).To(Equal(` {"some attribute": "some value"}`))
 }
 
 func TestAttributeGroups(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	output := &strings.Builder{}
-	h := nblog.NewHandler(output, nblog.Level(slog.LevelDebug))
-	logger := slog.New(h)
+	output := &LineBuffer{}
+	logger := slog.New(nblog.NewHandler(output))
 
-	logger.Debug("a message", "some attribute", "some value",
+	logger.Info("a message", "some attribute", "some value",
 		slog.Group("a group", slog.Int("an int", 5), slog.Bool("a bool", true)))
 
-	attrs := strings.SplitN(output.String(), "a message", 2)[1]
-	g.Expect(attrs).To(Equal(` {"some attribute": "some value", "a group": {"an int": 5, "a bool": true}}
-`))
+	attrs := strings.SplitN(output.Lines[0], "a message", 2)[1]
+	g.Expect(attrs).To(Equal(` {"some attribute": "some value", "a group": {"an int": 5, "a bool": true}}`))
 }
 
 func TestAttributeTypes(t *testing.T) {
@@ -98,12 +138,12 @@ func TestAttributeTypes(t *testing.T) {
 			t.Parallel()
 			g := NewWithT(t)
 
-			output := &strings.Builder{}
+			output := &LineBuffer{}
 			logger := slog.New(nblog.NewHandler(output))
 
 			logger.Info("A", pair.Attr)
 
-			g.Expect(output.String()).To(HaveSuffix("A {%s}\n", pair.Expected))
+			g.Expect(output.Lines[0]).To(HaveSuffix(`A {%s}`, pair.Expected))
 		})
 	}
 }
@@ -112,46 +152,12 @@ func TestTimestampFormat(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	output := &strings.Builder{}
-	h := nblog.NewHandler(output, nblog.TimestampFormat(nblog.TimeOnlyFormat))
-	logger := slog.New(h)
+	output := &LineBuffer{}
+	logger := slog.New(nblog.NewHandler(output, nblog.TimestampFormat(nblog.TimeOnlyFormat)))
 
 	logger.Info("a message")
 
-	g.Expect(output.String()).To(MatchRegexp(heredoc.Doc(`
-		^%[1]s \[.*a message
-		`),
-		TimeOnlyRegex,
-	))
-}
-
-// MockWriter is a writer that discards its input and instead merely counts the
-// calls to its Write method.
-type MockWriter struct {
-	WriteCallCount uint
-}
-
-func (mw *MockWriter) Write(p []byte) (int, error) {
-	mw.WriteCallCount++
-	return len(p), nil
-}
-
-// TestAtomicOutput checks how many times the log handler writes to its output
-// buffer for each log message. It should be _once_ to support writers that
-// perform logic between calls to Write. For example, natefinch/lumberjack
-// checks the future log size before each call to Write, which could result in
-// a log message being split acros multiple files.
-func TestAtomicOutput(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	output := &MockWriter{}
-	h := nblog.NewHandler(output)
-	logger := slog.New(h)
-
-	logger.Info("a message", slog.String("attr", "value"))
-	logger.Warn("another message")
-	g.Expect(output.WriteCallCount).To(Equal(uint(2)), "number of calls to Write")
+	g.Expect(output.Lines[0]).To(MatchRegexp(`^%[1]s \[.*a message`, TimeOnlyRegex))
 }
 
 func TestConstantLevelFiltering(t *testing.T) {
@@ -159,32 +165,26 @@ func TestConstantLevelFiltering(t *testing.T) {
 
 	levels := []struct {
 		slog.Level
-		Matcher types.GomegaMatcher
+		Matchers []any // Really types.GomegaMatcher
 	}{
-		{slog.LevelDebug, And(
+		{slog.LevelDebug, []any{
 			ContainSubstring("<DEBUG>"),
 			ContainSubstring("<INFO>"),
 			ContainSubstring("<WARN>"),
 			ContainSubstring("<ERROR>"),
-		)},
-		{slog.LevelInfo, And(
-			Not(ContainSubstring("<DEBUG>")),
+		}},
+		{slog.LevelInfo, []any{
 			ContainSubstring("<INFO>"),
 			ContainSubstring("<WARN>"),
 			ContainSubstring("<ERROR>"),
-		)},
-		{slog.LevelWarn, And(
-			Not(ContainSubstring("<DEBUG>")),
-			Not(ContainSubstring("<INFO>")),
+		}},
+		{slog.LevelWarn, []any{
 			ContainSubstring("<WARN>"),
 			ContainSubstring("<ERROR>"),
-		)},
-		{slog.LevelError, And(
-			Not(ContainSubstring("<DEBUG>")),
-			Not(ContainSubstring("<INFO>")),
-			Not(ContainSubstring("<WARN>")),
+		}},
+		{slog.LevelError, []any{
 			ContainSubstring("<ERROR>"),
-		)},
+		}},
 	}
 
 	for _, lev := range levels {
@@ -193,7 +193,7 @@ func TestConstantLevelFiltering(t *testing.T) {
 		t.Run(lev.Level.String(), func(t *testing.T) {
 			t.Parallel()
 			g := NewWithT(t)
-			output := &strings.Builder{}
+			output := &LineBuffer{}
 			logger := slog.New(nblog.NewHandler(output, nblog.Level(lev.Level)))
 
 			logger.Debug("one")
@@ -201,7 +201,7 @@ func TestConstantLevelFiltering(t *testing.T) {
 			logger.Warn("three")
 			logger.Error("four")
 
-			g.Expect(output.String()).To(lev.Matcher)
+			g.Expect(output.Lines).To(HaveExactElements(lev.Matchers...))
 		})
 	}
 }
@@ -210,7 +210,7 @@ func TestChangedLevelFiltering(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	output := &strings.Builder{}
+	output := &LineBuffer{}
 	var level slog.LevelVar
 	logger := slog.New(nblog.NewHandler(output, nblog.Level(&level)))
 
@@ -224,19 +224,22 @@ func TestChangedLevelFiltering(t *testing.T) {
 	logger.Warn("hidden", slog.Int("line", 6))
 	logger.Error("shown", slog.Int("line", 7))
 
-	g.Expect(output.String()).NotTo(ContainSubstring("hidden"))
+	g.Expect(output.Lines).To(HaveEach(And(
+		ContainSubstring("shown"),
+		Not(ContainSubstring("hidden")),
+	)))
 }
 
 func TestOmitCallerPackage(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	output := &strings.Builder{}
+	output := &LineBuffer{}
 	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(false)))
 
 	logger.Info("message")
 
-	g.Expect(output.String()).To(And(
+	g.Expect(output.Lines[0]).To(And(
 		Not(ContainSubstring(ThisPackage)),
 		ContainSubstring(" TestOmitCallerPackage:"),
 	))
@@ -246,12 +249,12 @@ func TestIncludeCallerPackage(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	output := &strings.Builder{}
+	output := &LineBuffer{}
 	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(true)))
 
 	logger.Info("message")
 
-	g.Expect(output.String()).To(And(
+	g.Expect(output.Lines[0]).To(And(
 		ContainSubstring(ThisPackage),
 		ContainSubstring(".TestIncludeCallerPackage:"),
 	))
@@ -261,12 +264,12 @@ func TestOverrideCallerNameImmediate(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	output := &strings.Builder{}
+	output := &LineBuffer{}
 	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(true)))
 
 	logger.Info("message", slog.String("who", "override"))
 
-	g.Expect(output.String()).To(And(
+	g.Expect(output.Lines[0]).To(And(
 		Not(ContainSubstring(ThisPackage)),
 		Not(ContainSubstring(".TestOverrideCallerNameImmediate:")),
 		ContainSubstring(" override: "),
@@ -278,13 +281,13 @@ func TestOverrideCallerNameWith(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	output := &strings.Builder{}
+	output := &LineBuffer{}
 	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(true)))
 
 	logger = logger.With("who", "override")
 	logger.Info("message")
 
-	g.Expect(output.String()).To(And(
+	g.Expect(output.Lines[0]).To(And(
 		Not(ContainSubstring(ThisPackage)),
 		Not(ContainSubstring(".TestOverrideCallerNameWith:")),
 		ContainSubstring(" override: "),
@@ -298,46 +301,34 @@ func TestWithGroup(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	output := &strings.Builder{}
+	output := &LineBuffer{}
 	logger := slog.New(nblog.NewHandler(output))
 
 	logger = logger.With("c", 3).WithGroup("g").With("a", 1).WithGroup("h")
 	logger.Info("message", slog.Int("b", 1))
 
-	g.Expect(output.String()).To(HaveSuffix(`: message {"c": 3, "g": {"a": 1, "h": {"b": 1}}}
-`))
+	g.Expect(output.Lines[0]).To(HaveSuffix(`: message {"c": 3, "g": {"a": 1, "h": {"b": 1}}}`))
 }
 
-// TestEmptyWithGroup checks that groups added by WithGroup will appear in the
-// output even when they end up containing no attributes. This is for
-// consistency with [golang.org/x/exp/slog.JSONHandler]. Groups added with
-// [golang.org/x/exp/slog.Group] are ommited when empty, as tested in
-// [TestEmptyGroup].
-func TestEmptyWithGroup(t *testing.T) {
+// TestEmptyGroups checks that groups added by WithGroup will appear in the
+// output even when they end up containing no attributes, but that groups added
+// with [golang.org/x/exp/slog.Group] will be omitted when the contain no
+// attributes. This is for consistency with
+// [golang.org/x/exp/slog.JSONHandler].
+func TestEmptyGroups(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	output := &strings.Builder{}
+	output := &LineBuffer{}
 	logger := slog.New(nblog.NewHandler(output))
 
 	logger.With(slog.Int("a", 1)).WithGroup("u").Info("message")
-
-	g.Expect(output.String()).To(HaveSuffix(`: message {"a": 1, "u": {}}
-`))
-}
-
-// TestEmptyGroup checks that groups added by [golang.org/x/exp/slog.Group] are
-// omitted from the output when they're empty. This is consistent with
-// [golang.org/x/exp/slog.JSONHandler].
-func TestEmptyGroup(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	output := &strings.Builder{}
-	logger := slog.New(nblog.NewHandler(output))
-
 	logger.With(slog.Int("a", 1), slog.Group("r")).Info("message")
+	logger.With(slog.Int("a", 1)).Info("message", slog.Group("s"))
 
-	g.Expect(output.String()).To(HaveSuffix(`: message {"a": 1}
-`))
+	g.Expect(output.Lines).To(HaveExactElements(
+		HaveSuffix(`: message {"a": 1, "u": {}}`),
+		HaveSuffix(`: message {"a": 1}`),
+		HaveSuffix(`: message {"a": 1}`),
+	))
 }

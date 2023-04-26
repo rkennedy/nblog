@@ -26,7 +26,11 @@ type LegacyHandler struct {
 	level             slog.Leveler
 	timestampFormat   optional.Value[string]
 	useFullCallerName bool
-	attrs             []slog.Attr
+	who               optional.Value[string]
+
+	attrs      *strings.Builder
+	needComma  bool
+	braceLevel uint
 }
 
 var _ slog.Handler = &LegacyHandler{}
@@ -76,6 +80,7 @@ func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
 		destination:       dest,
 		level:             slog.LevelInfo,
 		useFullCallerName: false,
+		attrs:             &strings.Builder{},
 	}
 	for _, opt := range options {
 		opt(result)
@@ -87,12 +92,8 @@ func (h *LegacyHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.level.Level() <= level
 }
 
-func nextField(wroteFirstSpace *bool, firstField *bool, out *jsoniter.Stream, key string) {
-	if wroteFirstSpace != nil && !*wroteFirstSpace {
-		*wroteFirstSpace = true
-		out.WriteRaw(" ")
-		out.WriteObjectStart()
-	} else if !*firstField {
+func nextField(firstField *bool, out *jsoniter.Stream, key string) {
+	if !*firstField {
 		out.WriteMore()
 		out.WriteRaw(" ")
 	}
@@ -101,38 +102,38 @@ func nextField(wroteFirstSpace *bool, firstField *bool, out *jsoniter.Stream, ke
 	out.WriteRaw(" ")
 }
 
-func attrToJson(wroteFirstSpace *bool, firstField *bool, out *jsoniter.Stream, attr slog.Attr) {
+func attrToJson(firstField *bool, out *jsoniter.Stream, attr slog.Attr) {
 	switch attr.Value.Kind() {
 	case slog.KindString:
-		nextField(wroteFirstSpace, firstField, out, attr.Key)
+		nextField(firstField, out, attr.Key)
 		out.WriteString(attr.Value.String())
 	case slog.KindInt64:
-		nextField(wroteFirstSpace, firstField, out, attr.Key)
+		nextField(firstField, out, attr.Key)
 		out.WriteInt64(attr.Value.Int64())
 	case slog.KindUint64:
-		nextField(wroteFirstSpace, firstField, out, attr.Key)
+		nextField(firstField, out, attr.Key)
 		out.WriteUint64(attr.Value.Uint64())
 	case slog.KindFloat64:
-		nextField(wroteFirstSpace, firstField, out, attr.Key)
+		nextField(firstField, out, attr.Key)
 		out.WriteFloat64(attr.Value.Float64())
 	case slog.KindBool:
-		nextField(wroteFirstSpace, firstField, out, attr.Key)
+		nextField(firstField, out, attr.Key)
 		out.WriteBool(attr.Value.Bool())
 	case slog.KindDuration:
-		nextField(wroteFirstSpace, firstField, out, attr.Key)
+		nextField(firstField, out, attr.Key)
 		out.WriteString(attr.Value.Duration().String())
 	case slog.KindTime:
-		nextField(wroteFirstSpace, firstField, out, attr.Key)
+		nextField(firstField, out, attr.Key)
 		out.WriteString(attr.Value.Time().String())
 	case slog.KindAny:
-		nextField(wroteFirstSpace, firstField, out, attr.Key)
+		nextField(firstField, out, attr.Key)
 		out.WriteVal(attr.Value.Any())
 	case slog.KindGroup:
-		nextField(wroteFirstSpace, firstField, out, attr.Key)
+		nextField(firstField, out, attr.Key)
 		out.WriteObjectStart()
 		thisFirst := true
 		for _, at := range attr.Value.Group() {
-			attrToJson(nil, &thisFirst, out, at)
+			attrToJson(&thisFirst, out, at)
 		}
 		out.WriteObjectEnd()
 	}
@@ -151,6 +152,12 @@ func getCaller(rec slog.Record, omitPackage bool) string {
 	return who
 }
 
+func cloneBuilder(b *strings.Builder) *strings.Builder {
+	result := &strings.Builder{}
+	_, _ = result.WriteString(b.String())
+	return result
+}
+
 func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	var timeString string
 	if !rec.Time.IsZero() {
@@ -158,28 +165,94 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 		timeString = fmt.Sprintf("%s ", rec.Time.Format(format))
 	}
 
-	attributeBuffer := &strings.Builder{}
-	out := jsoniter.NewStream(jsoniter.ConfigDefault, attributeBuffer, 50)
-	wroteSpace := false
-	firstField := true
-	var who optional.Value[string]
-
-	processAttr := func(attr slog.Attr) bool {
+	who := h.who
+	immediateAttrs := 0
+	rec.Attrs(func(attr slog.Attr) bool {
 		if attr.Key == "who" {
 			who = optional.New(attr.Value.String())
-		} else {
-			attrToJson(&wroteSpace, &firstField, out, attr)
+			return true
 		}
+		if attr.Value.Kind() == slog.KindGroup && len(attr.Value.Group()) == 0 {
+			// JSONHandler omits empty group attributes, so we will, too.
+			return true
+		}
+		immediateAttrs++
 		return true
+	})
+
+	attributeBuffer := cloneBuilder(h.attrs)
+	out := jsoniter.NewStream(jsoniter.ConfigDefault, attributeBuffer, 50)
+	braceLevel := h.braceLevel
+	needComma := h.needComma
+	if immediateAttrs > 0 && h.attrs.Len() == 0 {
+		out.WriteRaw(" ")
+		out.WriteObjectStart()
+		braceLevel++
+		needComma = false
 	}
-	for _, attr := range h.attrs {
-		processAttr(attr)
-	}
-	rec.Attrs(processAttr)
-	if wroteSpace {
+
+	rec.Attrs(func(attr slog.Attr) bool {
+		if attr.Key == "who" {
+			return true
+		}
+		if attr.Value.Kind() == slog.KindGroup && len(attr.Value.Group()) == 0 {
+			// JSONHandler omits empty group attributes, so we will, too.
+			return true
+		}
+		if needComma {
+			out.WriteMore()
+			out.WriteRaw(" ")
+		}
+		switch attr.Value.Kind() {
+		case slog.KindString:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteString(attr.Value.String())
+		case slog.KindInt64:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteInt64(attr.Value.Int64())
+		case slog.KindUint64:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteUint64(attr.Value.Uint64())
+		case slog.KindFloat64:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteFloat64(attr.Value.Float64())
+		case slog.KindBool:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteBool(attr.Value.Bool())
+		case slog.KindDuration:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteString(attr.Value.Duration().String())
+		case slog.KindTime:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteString(attr.Value.Time().String())
+		case slog.KindAny:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteVal(attr.Value.Any())
+		case slog.KindGroup:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteObjectStart()
+			thisFirst := true
+			for _, at := range attr.Value.Group() {
+				attrToJson(&thisFirst, out, at)
+			}
+			out.WriteObjectEnd()
+		}
+		needComma = true
+		return true
+	})
+	for ; braceLevel > 0; braceLevel-- {
 		out.WriteObjectEnd()
-		out.Flush()
 	}
+	out.Flush()
 
 	fmt.Fprintf(h.destination, "%s[%d] <%s> %s: %s%s\n",
 		timeString,
@@ -193,14 +266,108 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 }
 
 func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &LegacyHandler{
+	result := &LegacyHandler{
 		destination: h.destination,
 		level:       h.level,
-		attrs:       append(h.attrs, attrs...),
+		who:         h.who,
+		attrs:       cloneBuilder(h.attrs),
+		needComma:   h.needComma,
+		braceLevel:  h.braceLevel,
 	}
+	out := jsoniter.NewStream(jsoniter.ConfigDefault, result.attrs, 50)
+	defer out.Flush()
+
+	outputEmpty := result.attrs.Len() == 0
+	for _, attr := range attrs {
+		if attr.Key == "who" {
+			result.who = optional.New(attr.Value.String())
+			continue
+		}
+		if attr.Value.Kind() == slog.KindGroup && len(attr.Value.Group()) == 0 {
+			// JSONHandler omits empty group attributes, so we will, too.
+			continue
+		}
+		if outputEmpty {
+			out.WriteRaw(" ")
+			out.WriteObjectStart()
+			result.braceLevel++
+			result.needComma = false
+			outputEmpty = false
+		}
+		if result.needComma {
+			out.WriteMore()
+			out.WriteRaw(" ")
+		}
+		switch attr.Value.Kind() {
+		case slog.KindString:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteString(attr.Value.String())
+		case slog.KindInt64:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteInt64(attr.Value.Int64())
+		case slog.KindUint64:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteUint64(attr.Value.Uint64())
+		case slog.KindFloat64:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteFloat64(attr.Value.Float64())
+		case slog.KindBool:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteBool(attr.Value.Bool())
+		case slog.KindDuration:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteString(attr.Value.Duration().String())
+		case slog.KindTime:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteString(attr.Value.Time().String())
+		case slog.KindAny:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteVal(attr.Value.Any())
+		case slog.KindGroup:
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteObjectStart()
+			thisFirst := true
+			for _, at := range attr.Value.Group() {
+				attrToJson(&thisFirst, out, at)
+			}
+			out.WriteObjectEnd()
+		}
+		result.needComma = true
+	}
+	return result
 }
 
 func (h *LegacyHandler) WithGroup(name string) slog.Handler {
-	// TODO Implement log groups
-	return h
+	result := &LegacyHandler{
+		destination: h.destination,
+		level:       h.level,
+		who:         h.who,
+		attrs:       cloneBuilder(h.attrs),
+		needComma:   false,
+		braceLevel:  h.braceLevel,
+	}
+	out := jsoniter.NewStream(jsoniter.ConfigDefault, result.attrs, 50)
+	defer out.Flush()
+	if result.attrs.Len() == 0 {
+		out.WriteRaw(" ")
+		out.WriteObjectStart()
+		result.braceLevel++
+	} else if h.needComma {
+		out.WriteMore()
+		out.WriteRaw(" ")
+	}
+	out.WriteObjectField(name)
+	out.WriteRaw(" ")
+	out.WriteObjectStart()
+	result.braceLevel++
+	return result
 }

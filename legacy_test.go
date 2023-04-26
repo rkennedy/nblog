@@ -291,3 +291,53 @@ func TestOverrideCallerNameWith(t *testing.T) {
 		Not(ContainSubstring(`"who": "override"`)),
 	))
 }
+
+// TestWithGroup checks that multiple nested levels of
+// [golang.org/x/exp/slog.Logger.WithGroup] appear correctly in the output.
+func TestWithGroup(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &strings.Builder{}
+	logger := slog.New(nblog.NewHandler(output))
+
+	logger = logger.With("c", 3).WithGroup("g").With("a", 1).WithGroup("h")
+	logger.Info("message", slog.Int("b", 1))
+
+	g.Expect(output.String()).To(HaveSuffix(`: message {"c": 3, "g": {"a": 1, "h": {"b": 1}}}
+`))
+}
+
+// TestEmptyWithGroup checks that groups added by WithGroup will appear in the
+// output even when they end up containing no attributes. This is for
+// consistency with [golang.org/x/exp/slog.JSONHandler]. Groups added with
+// [golang.org/x/exp/slog.Group] are ommited when empty, as tested in
+// [TestEmptyGroup].
+func TestEmptyWithGroup(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &strings.Builder{}
+	logger := slog.New(nblog.NewHandler(output))
+
+	logger.With(slog.Int("a", 1)).WithGroup("u").Info("message")
+
+	g.Expect(output.String()).To(HaveSuffix(`: message {"a": 1, "u": {}}
+`))
+}
+
+// TestEmptyGroup checks that groups added by [golang.org/x/exp/slog.Group] are
+// omitted from the output when they're empty. This is consistent with
+// [golang.org/x/exp/slog.JSONHandler].
+func TestEmptyGroup(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &strings.Builder{}
+	logger := slog.New(nblog.NewHandler(output))
+
+	logger.With(slog.Int("a", 1), slog.Group("r")).Info("message")
+
+	g.Expect(output.String()).To(HaveSuffix(`: message {"a": 1}
+`))
+}

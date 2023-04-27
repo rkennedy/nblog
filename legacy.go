@@ -17,6 +17,15 @@ import (
 	"golang.org/x/exp/slog"
 )
 
+// ReplaceAttrFunc is the type of callback used with [ReplaceAttrs] to allow
+// editing, replacing, or removing of attributes nefore a log record is
+// recorded. The function will be called for each non-group attribute, along
+// with a list of the currently nested groups. The function can return the
+// original attribute to log it as-is, return a different attribute to use it
+// instead, or return an attribute with an empty Key value to omit the current
+// attribute entirely.
+type ReplaceAttrFunc func(groups []string, attr slog.Attr) slog.Attr
+
 // LegacyHandler is an implementation of [golang.org/x/exp/slog.Handler] that
 // mimics the format used by legacy NetBackup logging. Attributes, if present,
 // are appended to the line after the given message.
@@ -30,9 +39,11 @@ type LegacyHandler struct {
 	useFullCallerName bool
 	who               optional.Value[string]
 
-	attrs      *strings.Builder
-	needComma  bool
-	braceLevel uint
+	attrs       *strings.Builder
+	needComma   bool
+	braceLevel  uint
+	groups      []string
+	replaceAttr ReplaceAttrFunc
 }
 
 var _ slog.Handler = &LegacyHandler{}
@@ -77,6 +88,16 @@ func UseFullCallerName(use bool) LegacyOption {
 	}
 }
 
+// ReplaceAttrs returns a [LegacyOption] callback that will configure a handler
+// with the given [ReplaceAttrFunc] callback function for processing log
+// attributes prior to being recorded. Only one ReplaceAttrFunc callback can be
+// configured for a given handler.
+func ReplaceAttrs(replaceAttr ReplaceAttrFunc) LegacyOption {
+	return func(handler *LegacyHandler) {
+		handler.replaceAttr = replaceAttr
+	}
+}
+
 func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
 	result := &LegacyHandler{
 		destination:       dest,
@@ -94,13 +115,21 @@ func (h *LegacyHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.level.Level() <= level
 }
 
-func attrToJson(needComma *bool, out *jsoniter.Stream, attr slog.Attr, beforeWrite func()) {
+func attrToJson(needComma *bool, out *jsoniter.Stream, attr slog.Attr, beforeWrite func(), groups []string, replaceAttr ReplaceAttrFunc) {
 	if attr.Key == "who" {
 		return
 	}
-	if attr.Value.Kind() == slog.KindGroup && if len(attr.Value.Group()) == 0 {
-		// JSONHandler omits empty group attributes, so we will, too.
-		return
+	if attr.Value.Kind() == slog.KindGroup {
+		if len(attr.Value.Group()) == 0 {
+			// JSONHandler omits empty group attributes,
+			// so we will, too.
+			return
+		}
+	} else if replaceAttr != nil {
+		attr = replaceAttr(groups, attr)
+		if attr.Key == "" {
+			return
+		}
 	}
 
 	if beforeWrite != nil {
@@ -134,8 +163,9 @@ func attrToJson(needComma *bool, out *jsoniter.Stream, attr slog.Attr, beforeWri
 	case slog.KindGroup:
 		out.WriteObjectStart()
 		thisNeedComma := false
+		thisGroups := append(groups, attr.Key)
 		for _, at := range attr.Value.Group() {
-			attrToJson(&thisNeedComma, out, at, nil)
+			attrToJson(&thisNeedComma, out, at, nil, thisGroups, replaceAttr)
 		}
 		out.WriteObjectEnd()
 	}
@@ -200,7 +230,7 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	}
 
 	rec.Attrs(func(attr slog.Attr) bool {
-		attrToJson(&needComma, out, attr, beforeWrite)
+		attrToJson(&needComma, out, attr, beforeWrite, h.groups, h.replaceAttr)
 		return true
 	})
 	for ; braceLevel > 0; braceLevel-- {
@@ -227,6 +257,8 @@ func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		attrs:       cloneBuilder(h.attrs),
 		needComma:   h.needComma,
 		braceLevel:  h.braceLevel,
+		groups:      h.groups,
+		replaceAttr: h.replaceAttr,
 	}
 	out := jsoniter.NewStream(jsoniter.ConfigDefault, result.attrs, 50)
 	defer out.Flush()
@@ -247,7 +279,7 @@ func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		if attr.Key == "who" {
 			result.who = optional.New(attr.Value.String())
 		}
-		attrToJson(&result.needComma, out, attr, beforeWrite)
+		attrToJson(&result.needComma, out, attr, beforeWrite, result.groups, result.replaceAttr)
 	}
 	return result
 }

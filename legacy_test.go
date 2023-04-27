@@ -332,3 +332,68 @@ func TestEmptyGroups(t *testing.T) {
 		HaveSuffix(`: message {"a": 1}`),
 	))
 }
+
+func TestRenameAttr(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	repl := func(groups []string, attr slog.Attr) slog.Attr {
+		if attr.Key == "a" {
+			return slog.Attr{
+				Key:   "aa",
+				Value: attr.Value,
+			}
+		}
+		return attr
+	}
+	output := &LineBuffer{}
+	logger := slog.New(nblog.NewHandler(output, nblog.ReplaceAttrs(repl)))
+
+	logger.Info("message", slog.Int("a", 5), slog.Bool("b", true))
+	logger.With(slog.Int("a", 5), slog.Bool("b", true)).Info("message")
+
+	g.Expect(output.Lines).To(HaveEach(
+		HaveSuffix(`message {"aa": 5, "b": true}`),
+	))
+}
+
+func TestRemoveAttr(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	repl := func(groups []string, attr slog.Attr) slog.Attr {
+		if attr.Key == "a" {
+			return slog.Attr{}
+		}
+		return attr
+	}
+	output := &LineBuffer{}
+	logger := slog.New(nblog.NewHandler(output, nblog.ReplaceAttrs(repl)))
+
+	logger.Info("message", slog.Int("a", 5), slog.Bool("b", true))
+	logger.With(slog.Int("a", 5), slog.Bool("b", true)).Info("message")
+
+	g.Expect(output.Lines).To(HaveEach(
+		HaveSuffix(`message {"b": true}`),
+	))
+}
+
+func TestReplaceGroupNames(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	var receivedGroups [][]string
+	repl := func(groups []string, attr slog.Attr) slog.Attr {
+		receivedGroups = append(receivedGroups, groups)
+		return attr
+	}
+	output := &LineBuffer{}
+	logger := slog.New(nblog.NewHandler(output, nblog.ReplaceAttrs(repl)))
+
+	logger.Info("message", slog.Group("a", slog.Int("b", 1), slog.Group("c", slog.Bool("d", false))))
+
+	g.Expect(receivedGroups).To(HaveExactElements(
+		[]string{"a"},
+		[]string{"a", "c"},
+	))
+}

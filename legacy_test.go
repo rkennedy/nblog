@@ -378,13 +378,48 @@ func TestRemoveAttr(t *testing.T) {
 	))
 }
 
+func TestReplaceTimeField(t *testing.T) {
+	t.Parallel()
+	replacements := []struct {
+		Name           string
+		Replacement    slog.Attr
+		ExpectedPrefix string
+	}{
+		// Log timestamp is replaced with time of moon landing.
+		{"withTime", slog.Time("test", time.Date(1969, time.July, 20, 20, 17, 0, 0, time.UTC)), "1969-07-20 20:17:00.000 ["},
+		// Log timestamp is replaced with other text.
+		{"withOtherValue", slog.String("test", "replacement time"), "replacement time ["},
+		// Log timestamp is omitted entirely.
+		{"withEmptyKey", slog.Any("", nil), "["},
+	}
+	for _, repl := range replacements {
+		repl := repl
+		t.Run(repl.Name, func(t *testing.T) {
+			t.Parallel()
+			g := NewWithT(t)
+
+			output := &LineBuffer{}
+			logger := slog.New(nblog.NewHandler(output, nblog.ReplaceAttrs(func(groups []string, attr slog.Attr) slog.Attr {
+				if len(groups) == 0 && attr.Key == nblog.TimeKey {
+					return repl.Replacement
+				}
+				return attr
+			})))
+
+			logger.Info("message")
+
+			g.Expect(output.Lines[0]).To(HavePrefix(repl.ExpectedPrefix))
+		})
+	}
+}
+
 func TestReplaceGroupNames(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	var receivedGroups [][]string
+	receivedGroups := map[string][]string{}
 	repl := func(groups []string, attr slog.Attr) slog.Attr {
-		receivedGroups = append(receivedGroups, groups)
+		receivedGroups[attr.Key] = groups
 		return attr
 	}
 	output := &LineBuffer{}
@@ -392,8 +427,8 @@ func TestReplaceGroupNames(t *testing.T) {
 
 	logger.Info("message", slog.Group("a", slog.Int("b", 1), slog.Group("c", slog.Bool("d", false))))
 
-	g.Expect(receivedGroups).To(HaveExactElements(
-		[]string{"a"},
-		[]string{"a", "c"},
+	g.Expect(receivedGroups).To(And(
+		HaveKeyWithValue("b", []string{"a"}),
+		HaveKeyWithValue("d", []string{"a", "c"}),
 	))
 }

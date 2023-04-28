@@ -432,3 +432,18 @@ func TestReplaceGroupNames(t *testing.T) {
 		HaveKeyWithValue("d", []string{"a", "c"}),
 	))
 }
+
+// UniformOutput is a callback function for use with [ReplaceAttrs]. It
+// replaces the time and process-ID pseudo-attributes with values that will be
+// the same on every run so that tests can check for predictable output.
+func UniformOutput(groups []string, attr slog.Attr) slog.Attr {
+	if len(groups) == 0 {
+		switch attr.Key {
+		case nblog.TimeKey:
+			return slog.Time(attr.Key, time.Date(2006, time.January, 2, 15, 4, 5, 0, time.UTC))
+		case nblog.PidKey:
+			return slog.Int(attr.Key, 42)
+		}
+	}
+	return attr
+}

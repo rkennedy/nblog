@@ -191,40 +191,41 @@ func cloneBuilder(b *strings.Builder) *strings.Builder {
 	return result
 }
 
-const (
-	// TimeKey is a sentinel value denoting the message timestamp
-	// for attribute replacement. The [ReplaceAttrFunc] callback
-	// will receive a Time attribute having this key. If the
-	// callback returns a Time attribute, its value will be
-	// formatted as from the [TimestampFormat] option. Returning
-	// an attribute with an empty key will omit the value as
-	// usual. Any other attribute result will have its String
-	// value used.
-	TimeKey = "time-75972059-5741-41f7-9248-e8594177835c"
-	// PidKey is a sentinel value denoting the process ID of the
-	// message for attribute replacement. The [ReplaceAttrFunc]
-	// callback will receive an Int attribute having this key.
-	// Returning an attribute with an empty key will omit the
-	// value as usual. Any other attribute result will have its
-	// String value used.
-	PidKey = "pid-47482072-7496-40a0-a048-ccfdba4e564e"
-	// LevelKey is a sentinel value denoting the severity level
-	// of the message for attribute replacement. The
-	// [ReplaceAttrFunc] callback will receive an Any attribute
-	// having this key. Returning an attribute with an empty key
-	// will omit the value as usual. Any other attribute result
-	// will have its String value used. The returned attribute
-	// will have no effect on level-based message filtering;
-	// returning a lower severity will not hide a message.
-	LevelKey = "level-933f69a5-69b4-4f8a-a6a6-14810b97fdad"
-	// MessageKey is a sentinel value denoting the message for
-	// attribute replacement. The [ReplaceAttrFunc] callback will
-	// receive a String attribute having this key. Returning an
-	// attribute with an empty key will omit the value as usual.
-	// Any other attribute result will have its String value
-	// used.
-	MessageKey = "message-5ae1bf30-54b2-4d50-8af7-7076b3a39e20"
-)
+// TimeKey is a sentinel value denoting the message timestamp
+// for attribute replacement. The [ReplaceAttrFunc] callback
+// will receive a Time attribute having this key. If the
+// callback returns a Time attribute, its value will be
+// formatted as from the [TimestampFormat] option. Returning
+// an attribute with an empty key will omit the value as
+// usual. Any other attribute result will have its String
+// value used.
+const TimeKey = "time-75972059-5741-41f7-9248-e8594177835c"
+
+// PidKey is a sentinel value denoting the process ID of the
+// message for attribute replacement. The [ReplaceAttrFunc]
+// callback will receive an Int attribute having this key.
+// Returning an attribute with an empty key will omit the
+// value as usual. Any other attribute result will have its
+// String value used.
+const PidKey = "pid-47482072-7496-40a0-a048-ccfdba4e564e"
+
+// LevelKey is a sentinel value denoting the severity level
+// of the message for attribute replacement. The
+// [ReplaceAttrFunc] callback will receive an Any attribute
+// having this key. Returning an attribute with an empty key
+// will omit the value as usual. Any other attribute result
+// will have its String value used. The returned attribute
+// will have no effect on level-based message filtering;
+// returning a lower severity will not hide a message.
+const LevelKey = "level-933f69a5-69b4-4f8a-a6a6-14810b97fdad"
+
+// MessageKey is a sentinel value denoting the message for
+// attribute replacement. The [ReplaceAttrFunc] callback will
+// receive a String attribute having this key. Returning an
+// attribute with an empty key will omit the value as usual.
+// Any other attribute result will have its String value
+// used.
+const MessageKey = "message-5ae1bf30-54b2-4d50-8af7-7076b3a39e20"
 
 func appendNonempty(s []string, value string) []string {
 	if value != "" {

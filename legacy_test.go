@@ -458,6 +458,29 @@ func TestChainingReplacements(t *testing.T) {
 	g.Expect(output.Lines[0]).To(HaveSuffix(` message {"a": 8, "b": 4}`))
 }
 
+func TestNumericSeverity(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &LineBuffer{}
+	logger := slog.New(nblog.NewHandler(output,
+		nblog.Level(slog.LevelDebug),
+		nblog.NumericSeverity(true),
+	))
+
+	logger.Debug("debug")
+	logger.Info("info")
+	logger.Warn("warn")
+	logger.Error("error")
+
+	g.Expect(output.Lines).To(HaveExactElements(
+		ContainSubstring(" <2> "),
+		ContainSubstring(" <4> "),
+		ContainSubstring(" <8> "),
+		ContainSubstring(" <16> "),
+	))
+}
+
 // UniformOutput is a callback function for use with [ReplaceAttrs]. It
 // replaces the time and process-ID pseudo-attributes with values that will be
 // the same on every run so that tests can check for predictable output.

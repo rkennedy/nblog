@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"runtime"
 	"strings"
@@ -13,7 +14,6 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/rkennedy/optional"
-
 	"golang.org/x/exp/slog"
 )
 
@@ -37,6 +37,7 @@ type LegacyHandler struct {
 	level             slog.Leveler
 	timestampFormat   optional.Value[string]
 	useFullCallerName bool
+	numericSeverity   bool
 	who               optional.Value[string]
 
 	attrs            *strings.Builder
@@ -88,6 +89,20 @@ func UseFullCallerName(use bool) LegacyOption {
 	}
 }
 
+// NumericSeverity configures a handler to record the log level as a number
+// instead of a text label. Numbers used correspond to NetBackup severity
+// levels, not [slog] levels:
+//
+// - LeverDebug: 2
+// - LevelInfo: 4
+// - LevelWarn: 8
+// - LevelError: 16
+func NumericSeverity(numeric bool) LegacyOption {
+	return func(handler *LegacyHandler) {
+		handler.numericSeverity = numeric
+	}
+}
+
 // ReplaceAttrs returns a [LegacyOption] callback that will configure a handler
 // to include the given [ReplaceAttrFunc] callback function while processing log
 // attributes prior to being recorded. Callbacks are called in the order
@@ -108,7 +123,22 @@ func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
 	for _, opt := range options {
 		opt(result)
 	}
+	if result.numericSeverity {
+		ReplaceAttrs(numericSeverity)(result)
+	}
 	return result
+}
+
+func numericSeverity(groups []string, attr slog.Attr) slog.Attr {
+	if len(groups) == 0 && attr.Key == LevelKey {
+		leveler, ok := attr.Value.Any().(slog.Leveler)
+		if ok {
+			level := leveler.Level()
+			newLevel := math.Pow(2, float64(level+8)/4.0)
+			attr.Value = slog.Float64Value(newLevel)
+		}
+	}
+	return attr
 }
 
 func (h *LegacyHandler) Enabled(ctx context.Context, level slog.Level) bool {

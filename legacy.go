@@ -1,5 +1,5 @@
-// Package nblog provides a handler for [golang.org/x/exp/slog] that formats
-// logs in the style of Veritas NetBackup log messages.
+// Package nblog provides a handler for [slog] that formats logs in the style
+// of Veritas NetBackup log messages.
 package nblog
 
 import (
@@ -26,9 +26,9 @@ import (
 // attribute entirely.
 type ReplaceAttrFunc func(groups []string, attr slog.Attr) slog.Attr
 
-// LegacyHandler is an implementation of [golang.org/x/exp/slog.Handler] that
-// mimics the format used by legacy NetBackup logging. Attributes, if present,
-// are appended to the line after the given message.
+// LegacyHandler is an implementation of [slog.Handler] that mimics the format
+// used by legacy NetBackup logging. Attributes, if present, are appended to
+// the line after the given message.
 //
 // If an attribute named “who” is present, it overrides the name of the
 // calling function.
@@ -51,38 +51,38 @@ var _ slog.Handler = &LegacyHandler{}
 
 // LegacyOption is a function that applies options to a new [LegacyHandler].
 // Pass instances of this function to [NewHandler]. Use functions like
-// [TimestampFormat] to generate callbacks to apply variable values.
+// [TimestampFormat] to generate callbacks to apply variable values. Applying
+// LegacyOption values outside the context of NewHandler is not supported.
 type LegacyOption func(handler *LegacyHandler)
 
-// Level returns a LegacyOption callback that will configure a handler to
-// filter messages with a level lower than the given level.
+// Level returns a [LegacyOption] that will configure a handler to filter out
+// messages with a level lower than the given level.
 func Level(level slog.Leveler) LegacyOption {
 	return func(handler *LegacyHandler) {
 		handler.level = level
 	}
 }
 
+// Formats for use with [TimestampFormat].
 const (
 	FullDateFormat = time.DateTime + ".000"
 	TimeOnlyFormat = time.TimeOnly + ".000"
 )
 
-// TimestampFormat returns a LegacyOption callback that will configure a
-// handler to use the given time format (a la [time.Time.Format]) for log
-// timestamps at the start of each record. If left unset, the default used will
-// be [FullDateFormat]. The classic NetBackup format is [TimeOnlyFormat]; use
-// that if log rotation would make the repeated inclusion of the date
-// redundant.
+// TimestampFormat returns a [LegacyOption] that will configure a handler to
+// use the given time format (à la [time.Time.Format]) for log timestamps at
+// the start of each record. If left unset, the default used will be
+// [FullDateFormat]. The classic NetBackup format is [TimeOnlyFormat]; use that
+// if log rotation would make the repeated inclusion of the date redundant.
 func TimestampFormat(format string) LegacyOption {
 	return func(handler *LegacyHandler) {
 		handler.timestampFormat = optional.New(format)
 	}
 }
 
-// UseFullCallerName returns a LegacyOption callback that will configure a
-// handler to include or omit the package-name portion of the caller in log
-// messages. The default is to omit the package, so only the function name will
-// appear.
+// UseFullCallerName returns a [LegacyOption] that will configure a handler to
+// include or omit the package-name portion of the caller in log messages. The
+// default is to omit the package, so only the function name will appear.
 func UseFullCallerName(use bool) LegacyOption {
 	return func(handler *LegacyHandler) {
 		handler.useFullCallerName = use
@@ -103,16 +103,18 @@ func NumericSeverity(numeric bool) LegacyOption {
 	}
 }
 
-// ReplaceAttrs returns a [LegacyOption] callback that will configure a handler
-// to include the given [ReplaceAttrFunc] callback function while processing log
-// attributes prior to being recorded. Callbacks are called in the order
-// they're added to the handler.
+// ReplaceAttrs returns a [LegacyOption] that configures a handler to include
+// the given [ReplaceAttrFunc] callback function while processing log
+// attributes prior to being recorded. During log-formatting, callbacks are
+// called in the order they're added to the handler.
 func ReplaceAttrs(replaceAttr ReplaceAttrFunc) LegacyOption {
 	return func(handler *LegacyHandler) {
 		handler.replaceAttrFuncs = append(handler.replaceAttrFuncs, replaceAttr)
 	}
 }
 
+// NewHandler creates a new [LegacyHandler]. It receives a destination
+// [io.Writer] and a list of [LegacyOption] values to configure it.
 func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
 	result := &LegacyHandler{
 		destination:       dest,
@@ -141,6 +143,7 @@ func numericSeverity(groups []string, attr slog.Attr) slog.Attr {
 	return attr
 }
 
+// Enabled implements [slog.Handler.Enabled].
 func (h *LegacyHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.level.Level() <= level
 }
@@ -221,41 +224,24 @@ func cloneBuilder(b *strings.Builder) *strings.Builder {
 	return result
 }
 
-// TimeKey is a sentinel value denoting the message timestamp
-// for attribute replacement. The [ReplaceAttrFunc] callback
-// will receive a Time attribute having this key. If the
-// callback returns a Time attribute, its value will be
-// formatted as from the [TimestampFormat] option. Returning
-// an attribute with an empty key will omit the value as
-// usual. Any other attribute result will have its String
-// value used.
-const TimeKey = "time-75972059-5741-41f7-9248-e8594177835c"
-
-// PidKey is a sentinel value denoting the process ID of the
-// message for attribute replacement. The [ReplaceAttrFunc]
-// callback will receive an Int attribute having this key.
-// Returning an attribute with an empty key will omit the
-// value as usual. Any other attribute result will have its
-// String value used.
-const PidKey = "pid-47482072-7496-40a0-a048-ccfdba4e564e"
-
-// LevelKey is a sentinel value denoting the severity level
-// of the message for attribute replacement. The
-// [ReplaceAttrFunc] callback will receive an Any attribute
-// having this key. Returning an attribute with an empty key
-// will omit the value as usual. Any other attribute result
-// will have its String value used. The returned attribute
-// will have no effect on level-based message filtering;
-// returning a lower severity will not hide a message.
-const LevelKey = "level-933f69a5-69b4-4f8a-a6a6-14810b97fdad"
-
-// MessageKey is a sentinel value denoting the message for
-// attribute replacement. The [ReplaceAttrFunc] callback will
-// receive a String attribute having this key. Returning an
-// attribute with an empty key will omit the value as usual.
-// Any other attribute result will have its String value
-// used.
-const MessageKey = "message-5ae1bf30-54b2-4d50-8af7-7076b3a39e20"
+// When formatting a message, the handler calls any [ReplaceAttrFunc] callbacks
+// on any attributes associated with the message. It will synthesize attributes
+// representing the timestamp, process ID, level, and message, giving the
+// program an opportunity to modify, replace, or remove any of them, just as
+// for any other attributes. Such synthetic attributes are identified with
+// these labels, which should be unique enough not to collide with any
+// attribute keys in the program.
+//
+// If the replacement callback returns a [time.Time] value for the “time”
+// attribute, then it will be formatted with the configured [TimestampFormat]
+// option. Othe types for “time,” as well as other synthetic attributes, are
+// recorded in the log with [slog.Value.String].
+const (
+	TimeKey    = "time-75972059-5741-41f7-9248-e8594177835c"  // message timestamp
+	PidKey     = "pid-47482072-7496-40a0-a048-ccfdba4e564e"   // process ID
+	LevelKey   = "level-933f69a5-69b4-4f8a-a6a6-14810b97fdad" // severity level
+	MessageKey = "message-5ae1bf30-54b2-4d50-8af7-7076b3a39e20"
+)
 
 func appendNonempty(s []string, value string) []string {
 	if value != "" {
@@ -274,6 +260,7 @@ func (h *LegacyHandler) replaceAttr(groups []string, attr slog.Attr) slog.Attr {
 	return attr
 }
 
+// Handle implements [slog.Handler.Handle].
 func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	var parts []string
 
@@ -347,6 +334,7 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	return nil
 }
 
+// WithAttrs implements [slog.Handler.WithAttrs].
 func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	result := &LegacyHandler{
 		destination:      h.destination,
@@ -381,6 +369,7 @@ func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return result
 }
 
+// WithGroup implements [slog.Handler.WithGroup].
 func (h *LegacyHandler) WithGroup(name string) slog.Handler {
 	result := &LegacyHandler{
 		destination: h.destination,

@@ -433,6 +433,31 @@ func TestReplaceGroupNames(t *testing.T) {
 	))
 }
 
+func TestChainingReplacements(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	output := &LineBuffer{}
+	logger := slog.New(nblog.NewHandler(output,
+		nblog.ReplaceAttrs(func(g []string, attr slog.Attr) slog.Attr {
+			if attr.Key == "a" {
+				attr.Value = slog.Int64Value(3 + attr.Value.Int64())
+			}
+			return attr
+		}),
+		nblog.ReplaceAttrs(func(g []string, attr slog.Attr) slog.Attr {
+			if attr.Key == "a" || attr.Key == "b" {
+				attr.Value = slog.Int64Value(2 * attr.Value.Int64())
+			}
+			return attr
+		}),
+	))
+
+	logger.Info("message", "a", 1, "b", 2)
+
+	g.Expect(output.Lines[0]).To(HaveSuffix(` message {"a": 8, "b": 4}`))
+}
+
 // UniformOutput is a callback function for use with [ReplaceAttrs]. It
 // replaces the time and process-ID pseudo-attributes with values that will be
 // the same on every run so that tests can check for predictable output.

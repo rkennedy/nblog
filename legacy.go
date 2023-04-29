@@ -39,11 +39,11 @@ type LegacyHandler struct {
 	useFullCallerName bool
 	who               optional.Value[string]
 
-	attrs       *strings.Builder
-	needComma   bool
-	braceLevel  uint
-	groups      []string
-	replaceAttr ReplaceAttrFunc
+	attrs            *strings.Builder
+	needComma        bool
+	braceLevel       uint
+	groups           []string
+	replaceAttrFuncs []ReplaceAttrFunc
 }
 
 var _ slog.Handler = &LegacyHandler{}
@@ -89,12 +89,12 @@ func UseFullCallerName(use bool) LegacyOption {
 }
 
 // ReplaceAttrs returns a [LegacyOption] callback that will configure a handler
-// with the given [ReplaceAttrFunc] callback function for processing log
-// attributes prior to being recorded. Only one ReplaceAttrFunc callback can be
-// configured for a given handler.
+// to include the given [ReplaceAttrFunc] callback function while processing log
+// attributes prior to being recorded. Callbacks are called in the order
+// they're added to the handler.
 func ReplaceAttrs(replaceAttr ReplaceAttrFunc) LegacyOption {
 	return func(handler *LegacyHandler) {
-		handler.replaceAttr = replaceAttr
+		handler.replaceAttrFuncs = append(handler.replaceAttrFuncs, replaceAttr)
 	}
 }
 
@@ -115,7 +115,7 @@ func (h *LegacyHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.level.Level() <= level
 }
 
-func attrToJson(needComma *bool, out *jsoniter.Stream, attr slog.Attr, beforeWrite func(), groups []string, replaceAttr ReplaceAttrFunc) {
+func (h *LegacyHandler) attrToJson(needComma *bool, out *jsoniter.Stream, attr slog.Attr, beforeWrite func(), groups []string) {
 	if attr.Key == "who" {
 		return
 	}
@@ -125,8 +125,8 @@ func attrToJson(needComma *bool, out *jsoniter.Stream, attr slog.Attr, beforeWri
 			// so we will, too.
 			return
 		}
-	} else if replaceAttr != nil {
-		attr = replaceAttr(groups, attr)
+	} else {
+		attr = h.replaceAttr(groups, attr)
 		if attr.Key == "" {
 			return
 		}
@@ -165,7 +165,7 @@ func attrToJson(needComma *bool, out *jsoniter.Stream, attr slog.Attr, beforeWri
 		thisNeedComma := false
 		thisGroups := append(groups, attr.Key)
 		for _, at := range attr.Value.Group() {
-			attrToJson(&thisNeedComma, out, at, nil, thisGroups, replaceAttr)
+			h.attrToJson(&thisNeedComma, out, at, nil, thisGroups)
 		}
 		out.WriteObjectEnd()
 	}
@@ -233,15 +233,22 @@ func appendNonempty(s []string, value string) []string {
 	return s
 }
 
+func (h *LegacyHandler) replaceAttr(groups []string, attr slog.Attr) slog.Attr {
+	for _, fn := range h.replaceAttrFuncs {
+		attr = fn(groups, attr)
+		if attr.Key == "" {
+			break
+		}
+	}
+	return attr
+}
+
 func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	var parts []string
 
 	if !rec.Time.IsZero() {
 		format := h.timestampFormat.OrElse(FullDateFormat)
-		timeAttr := slog.Time(TimeKey, rec.Time)
-		if h.replaceAttr != nil {
-			timeAttr = h.replaceAttr(nil, timeAttr)
-		}
+		timeAttr := h.replaceAttr(nil, slog.Time(TimeKey, rec.Time))
 		if timeAttr.Key != "" {
 			if timeAttr.Value.Kind() == slog.KindTime {
 				parts = append(parts, timeAttr.Value.Time().Format(format))
@@ -251,18 +258,12 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 		}
 	}
 
-	pidAttr := slog.Int(PidKey, os.Getpid())
-	if h.replaceAttr != nil {
-		pidAttr = h.replaceAttr(nil, pidAttr)
-	}
+	pidAttr := h.replaceAttr(nil, slog.Int(PidKey, os.Getpid()))
 	if pidAttr.Key != "" {
 		parts = append(parts, fmt.Sprintf("[%s]", pidAttr.Value.String()))
 	}
 
-	levelAttr := slog.Any(LevelKey, rec.Level)
-	if h.replaceAttr != nil {
-		levelAttr = h.replaceAttr(nil, slog.Any(LevelKey, rec.Level))
-	}
+	levelAttr := h.replaceAttr(nil, slog.Any(LevelKey, rec.Level))
 	if levelAttr.Key != "" {
 		parts = append(parts, fmt.Sprintf("<%s>", levelAttr.Value.String()))
 	}
@@ -278,10 +279,7 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 		return getCaller(rec, !h.useFullCallerName)
 	})+":")
 
-	messageAttr := slog.String(MessageKey, rec.Message)
-	if h.replaceAttr != nil {
-		messageAttr = h.replaceAttr(nil, slog.String(MessageKey, rec.Message))
-	}
+	messageAttr := h.replaceAttr(nil, slog.String(MessageKey, rec.Message))
 	if messageAttr.Key != "" {
 		parts = appendNonempty(parts, messageAttr.Value.String())
 	}
@@ -302,7 +300,7 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 	}
 
 	rec.Attrs(func(attr slog.Attr) bool {
-		attrToJson(&needComma, out, attr, beforeWrite, h.groups, h.replaceAttr)
+		h.attrToJson(&needComma, out, attr, beforeWrite, h.groups)
 		return true
 	})
 	for ; braceLevel > 0; braceLevel-- {
@@ -320,14 +318,14 @@ func (h *LegacyHandler) Handle(ctx context.Context, rec slog.Record) error {
 
 func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	result := &LegacyHandler{
-		destination: h.destination,
-		level:       h.level,
-		who:         h.who,
-		attrs:       cloneBuilder(h.attrs),
-		needComma:   h.needComma,
-		braceLevel:  h.braceLevel,
-		groups:      h.groups,
-		replaceAttr: h.replaceAttr,
+		destination:      h.destination,
+		level:            h.level,
+		who:              h.who,
+		attrs:            cloneBuilder(h.attrs),
+		needComma:        h.needComma,
+		braceLevel:       h.braceLevel,
+		groups:           h.groups,
+		replaceAttrFuncs: h.replaceAttrFuncs,
 	}
 	out := jsoniter.NewStream(jsoniter.ConfigDefault, result.attrs, 50)
 	defer out.Flush()
@@ -347,7 +345,7 @@ func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		if attr.Key == "who" {
 			result.who = optional.New(attr.Value.String())
 		}
-		attrToJson(&result.needComma, out, attr, beforeWrite, result.groups, result.replaceAttr)
+		result.attrToJson(&result.needComma, out, attr, beforeWrite, result.groups)
 	}
 	return result
 }

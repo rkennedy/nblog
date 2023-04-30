@@ -48,3 +48,11 @@ func ExampleUseFullCallerName_false() {
 	logger.Info("info message")
 	// Output: 2006-01-02 15:04:05.000 [42] <INFO> ExampleUseFullCallerName_false: info message
 }
+
+func ExampleTrace() {
+	logger := slog.New(nblog.NewHandler(os.Stdout,
+		nblog.Level(slog.LevelDebug),
+		nblog.ReplaceAttrs(UniformOutput)))
+	defer nblog.Trace(logger).Stop()
+	logger.Info("message")
+}

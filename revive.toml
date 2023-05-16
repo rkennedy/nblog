@@ -1,0 +1,23 @@
+ignoreGeneratedHeader = false
+severity = "warning"
+confidence = 0.8
+enableAllRules = true
+
+[rule.argument-limit]
+arguments = [4]
+[rule.banned-characters]
+disabled = true  # Not useful.
+[rule.cognitive-complexity]
+arguments = [7]
+[rule.cyclomatic]
+disabled = true  # We're only using cognitive complexity.
+[rule.file-header]
+disabled = true  # Not useful here. Use pre-commit to enforce copyright, if needed.
+[rule.function-length]
+arguments = [10, 0]
+[rule.function-result-limit]
+disabled = true  # Not a useful metric for me.
+[rule.line-length-limit]
+arguments = [120]
+[rule.max-public-structs]
+disabled = true  # We don't care about this limit.

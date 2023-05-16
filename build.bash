@@ -63,14 +63,7 @@ set -euo pipefail
 if ${update}; then
     go get -u
 fi
-go mod tidy -go 1.20
-# TODO Check that goimports is the matching version.
-if ! test -x "${cache_path}/bin/goimports"; then
-    go install golang.org/x/tools/cmd/goimports
-fi
-"${cache_path}/bin/goimports" -w -l .
-go vet
-go test ./...
+go run mage.go -v check
 END
 
 # vim: et sw=4 ts=4

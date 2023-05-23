@@ -37,7 +37,6 @@ type LegacyHandler struct {
 	level             slog.Leveler
 	timestampFormat   optional.Value[string]
 	useFullCallerName bool
-	numericSeverity   bool
 	who               optional.Value[string]
 
 	attrs            *strings.Builder
@@ -97,10 +96,8 @@ func UseFullCallerName(use bool) LegacyOption {
 // - LevelInfo: 4
 // - LevelWarn: 8
 // - LevelError: 16
-func NumericSeverity(numeric bool) LegacyOption {
-	return func(handler *LegacyHandler) {
-		handler.numericSeverity = numeric
-	}
+func NumericSeverity() LegacyOption {
+	return ReplaceAttrs(replaceNumericSeverity)
 }
 
 // ReplaceAttrs returns a [LegacyOption] that configures a handler to include
@@ -122,13 +119,18 @@ func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
 		useFullCallerName: false,
 		attrs:             &strings.Builder{},
 	}
+	ReplaceAttrs(filterCaller)(result)
 	for _, opt := range options {
 		opt(result)
 	}
-	if result.numericSeverity {
-		ReplaceAttrs(replaceNumericSeverity)(result)
-	}
 	return result
+}
+
+func filterCaller(_ []string, attr slog.Attr) slog.Attr {
+	if attr.Key == "who" {
+		return slog.Attr{}
+	}
+	return attr
 }
 
 func replaceNumericSeverity(groups []string, attr slog.Attr) slog.Attr {
@@ -155,9 +157,6 @@ const singleSpace = " "
 func (h *LegacyHandler) attrToJSON(needComma *bool, out *jsoniter.Stream, attr slog.Attr,
 	beforeWrite func(), groups []string,
 ) {
-	if attr.Key == "who" {
-		return
-	}
 	if attr.Value.Kind() == slog.KindGroup {
 		if len(attr.Value.Group()) == 0 {
 			// JSONHandler omits empty group attributes,
@@ -298,6 +297,7 @@ func (h *LegacyHandler) Handle(_ context.Context, rec slog.Record) error {
 	rec.Attrs(func(attr slog.Attr) bool {
 		if attr.Key == "who" {
 			who = optional.New(attr.Value.String())
+			return false
 		}
 		return true
 	})

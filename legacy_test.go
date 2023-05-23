@@ -465,7 +465,7 @@ func TestNumericSeverity(t *testing.T) {
 	output := &LineBuffer{}
 	logger := slog.New(nblog.NewHandler(output,
 		nblog.Level(slog.LevelDebug),
-		nblog.NumericSeverity(true),
+		nblog.NumericSeverity(),
 	))
 
 	logger.Debug("debug")

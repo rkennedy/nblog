@@ -63,7 +63,7 @@ set -euo pipefail
 if ${update}; then
     go get -u
 fi
-go run mage.go -v check
+go run mage.go check
 END
 
 # vim: et sw=4 ts=4

@@ -8,6 +8,9 @@ import (
 	"golang.org/x/exp/slog"
 )
 
+// TraceStopper is the interface returned by [Trace] to allow callers to stop the trace. Use it with defer. For example:
+//
+// defer nblog.Trace(logger).Stop()
 type TraceStopper interface {
 	Stop()
 }
@@ -26,7 +29,7 @@ func (s *stopper) Stop() {
 
 type nullStopper struct{}
 
-func (ns *nullStopper) Stop() {}
+func (*nullStopper) Stop() {}
 
 // Trace marks the start of a function and returns a [TraceStopper] that can be
 // used to mark the end of the function. Trace logs the message “Entered” to
@@ -37,8 +40,8 @@ func Trace(logger *slog.Logger) TraceStopper {
 		return &nullStopper{}
 	}
 	var pcs [1]uintptr
-	// skip [runtime.Callers, this function]
-	runtime.Callers(2, pcs[:])
+	const callsToSkip = 2 // runtime.Callers, this function
+	runtime.Callers(callsToSkip, pcs[:])
 	pc := pcs[0]
 	now := time.Now()
 	r := slog.NewRecord(now, slog.LevelDebug, "Entered.", pc)

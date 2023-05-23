@@ -34,7 +34,8 @@ func (mw *MockWriter) Write(p []byte) (int, error) {
 // buffer for each log message. It should be _once_ to support writers that
 // perform logic between calls to Write. For example, natefinch/lumberjack
 // checks the future log size before each call to Write, which could result in
-// a log message being split acros multiple files.
+// a log message being split acros multiple files. Besides, this is also the
+// documented behavior from [slog.TextHandler.Handle].
 //
 // Subsequent tests using the [LineBuffer] implementation of [io.Writer] rely
 // on this atomic behavior to inspect the output.

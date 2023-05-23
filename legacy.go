@@ -338,8 +338,8 @@ func (h *LegacyHandler) Handle(_ context.Context, rec slog.Record) error {
 		parts = append(parts, attrString)
 	}
 
-	fmt.Fprintln(h.destination, strings.Join(parts, singleSpace))
-	return nil
+	_, err := fmt.Fprintln(h.destination, strings.Join(parts, singleSpace))
+	return err
 }
 
 // WithAttrs implements [slog.Handler.WithAttrs].
@@ -371,8 +371,9 @@ func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	for _, attr := range attrs {
 		if attr.Key == "who" {
 			result.who = optional.New(attr.Value.String())
+		} else {
+			result.attrToJSON(&result.needComma, out, attr, beforeWrite, result.groups)
 		}
-		result.attrToJSON(&result.needComma, out, attr, beforeWrite, result.groups)
 	}
 	return result
 }

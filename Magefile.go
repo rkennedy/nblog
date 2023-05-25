@@ -118,6 +118,12 @@ func (pkg Package) testImports() []string {
 	return append(pkg.TestImports, pkg.XTestImports...)
 }
 
+func (pkg Package) allGoFiles() []string {
+	files := append(pkg.GoFiles, pkg.TestGoFiles...)
+	files = append(files, pkg.IgnoredGoFiles...)
+	return append(files, pkg.XTestGoFiles...)
+}
+
 func getDependencies(baseMod string, files func(pkg Package) []string, imports func(pkg Package) []string) []string {
 	processedPackages := map[string]struct{}{}
 	worklist := []string{baseMod}
@@ -143,8 +149,23 @@ func getDependencies(baseMod string, files func(pkg Package) []string, imports f
 
 // Lint performs static analysis on all the code in the project.
 func Lint(ctx context.Context) error {
-	mg.CtxDeps(ctx, Generate, Revive)
-	return sh.RunV(reviveBin(), "-config", "revive.toml", "-set_exit_status", "./...")
+	mg.CtxDeps(ctx, Generate, Revive, loadDependencies)
+	pkg, err := getBasePackage()
+	if err != nil {
+		return err
+	}
+	args := append([]string{
+		"-formatter", "unix",
+		"-config", "revive.toml",
+		"-set_exit_status",
+	}, packages[pkg].allGoFiles()...)
+	return sh.RunWithV(
+		map[string]string{
+			"REVIVE_FORCE_COLOR": "1",
+		},
+		reviveBin(),
+		args...,
+	)
 }
 
 // Test runs unit tests.

@@ -1,5 +1,7 @@
 package nblog_test
 
+//revive:disable:add-constant
+
 import (
 	"os"
 	"time"
@@ -35,8 +37,8 @@ func ExampleUseFullCallerName_true() {
 		nblog.ReplaceAttrs(UniformOutput),
 	)
 	logger := slog.New(handler)
-	logger.Info("info message")
-	// Output: 2006-01-02 15:04:05.000 [42] <INFO> github.com/rkennedy/nblog_test.ExampleUseFullCallerName_true: info message
+	logger.Info("info")
+	// Output: 2006-01-02 15:04:05.000 [42] <INFO> github.com/rkennedy/nblog_test.ExampleUseFullCallerName_true: info
 }
 
 func ExampleUseFullCallerName_false() {

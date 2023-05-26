@@ -1,5 +1,6 @@
 //go:build mage
 
+// This magefile determines how to build and test the project.
 package main
 
 import (
@@ -29,10 +30,11 @@ func reviveBin() string {
 
 func logV(s string, args ...any) {
 	if mg.Verbose() {
-		fmt.Printf(s, args...)
+		_, _ = fmt.Printf(s, args...)
 	}
 }
 
+// Package represents the output from go list -json
 type Package struct {
 	Dir        string
 	ImportPath string
@@ -55,7 +57,7 @@ type Package struct {
 
 var packages = map[string]Package{}
 
-func loadDependencies(ctx context.Context) error {
+func loadDependencies(context.Context) error {
 	dependencies, err := sh.Output(mg.GoCmd(), "list", "-json", "./...")
 	if err != nil {
 		return err
@@ -63,21 +65,19 @@ func loadDependencies(ctx context.Context) error {
 	dec := json.NewDecoder(strings.NewReader(dependencies))
 	for {
 		var pkg Package
-		err = dec.Decode(&pkg)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
+		switch err = dec.Decode(&pkg); err {
+		case io.EOF:
+			return nil
+		case nil:
+			packages[pkg.ImportPath] = pkg
+		default:
 			return err
 		}
-		packages[pkg.ImportPath] = pkg
 	}
-
-	return nil
 }
 
 // Tidy cleans the go.mod file.
-func Tidy(ctx context.Context) error {
+func Tidy(context.Context) error {
 	return sh.RunV(mg.GoCmd(), "mod", "tidy", "-go", "1.20")
 }
 
@@ -118,31 +118,60 @@ func (pkg Package) testImports() []string {
 	return append(pkg.TestImports, pkg.XTestImports...)
 }
 
-func (pkg Package) allGoFiles() []string {
-	files := append(pkg.GoFiles, pkg.TestGoFiles...)
-	files = append(files, pkg.IgnoredGoFiles...)
-	return append(files, pkg.XTestGoFiles...)
+// indirectGoFiles returns the files that aren't automatically selected as being part of the package proper. If we
+// include _all_ source files here, then Revive interprets each file in isolation, which affects some of its analyses
+// that apply to the package as a whole (such as the package-comments rule). Thus, we use "./..." to request Revive
+// analyze all the package files, and then augment the request with the files from this function get "everything else."
+func (pkg Package) indirectGoFiles() []string {
+	files := append(pkg.TestGoFiles, pkg.XTestGoFiles...)
+	return append(files, pkg.IgnoredGoFiles...)
 }
 
-func getDependencies(baseMod string, files func(pkg Package) []string, imports func(pkg Package) []string) []string {
-	processedPackages := map[string]struct{}{}
+type set[T comparable] struct {
+	values map[T]any
+}
+
+func (s *set[T]) Insert(t T) bool {
+	if len(s.values) != 0 {
+		_, ok := s.values[t]
+		if ok {
+			return false
+		}
+	} else {
+		s.values = map[T]any{}
+	}
+	s.values[t] = nil
+	return true
+}
+
+func getDependencies(
+	baseMod string,
+	files func(pkg Package) []string,
+	imports func(pkg Package) []string,
+) (result []string) {
+	var processedPackages set[string]
 	worklist := []string{baseMod}
 
-	var result []string
 	for len(worklist) > 0 {
 		current := worklist[0]
 		worklist = worklist[1:]
-		if _, ok := processedPackages[current]; ok {
-			continue
-		}
-		processedPackages[current] = struct{}{}
-
-		if pkg, ok := packages[current]; ok {
-			for _, gofile := range files(pkg) {
-				result = append(result, filepath.Join(pkg.Dir, gofile))
+		if processedPackages.Insert(current) {
+			if pkg, ok := packages[current]; ok {
+				result = append(result, expandFiles(pkg, files)...)
+				worklist = append(worklist, imports(pkg)...)
 			}
-			worklist = append(worklist, imports(pkg)...)
 		}
+	}
+	return result
+}
+
+func expandFiles(
+	pkg Package,
+	files func(pkg Package) []string,
+) []string {
+	var result []string
+	for _, gofile := range files(pkg) {
+		result = append(result, filepath.Join(pkg.Dir, gofile))
 	}
 	return result
 }
@@ -158,7 +187,8 @@ func Lint(ctx context.Context) error {
 		"-formatter", "unix",
 		"-config", "revive.toml",
 		"-set_exit_status",
-	}, packages[pkg].allGoFiles()...)
+		"./...",
+	}, packages[pkg].indirectGoFiles()...)
 	return sh.RunWithV(
 		map[string]string{
 			"REVIVE_FORCE_COLOR": "1",
@@ -184,7 +214,6 @@ func BuildTest(ctx context.Context, pkg string) error {
 	mg.CtxDeps(ctx, loadDependencies)
 	deps := getDependencies(pkg, (Package).testFiles, (Package).testImports)
 	if len(deps) == 0 {
-		logV("No test source files for %s.\n", pkg)
 		return nil
 	}
 
@@ -192,12 +221,8 @@ func BuildTest(ctx context.Context, pkg string) error {
 	exe := filepath.Join(info.Dir, info.Name+".test")
 
 	newer, err := target.Path(exe, deps...)
-	if err != nil {
+	if err != nil || !newer {
 		return err
-	}
-	if !newer {
-		logV("Target is up to date.\n")
-		return nil
 	}
 	return sh.RunV(
 		mg.GoCmd(),
@@ -226,12 +251,12 @@ func BuildTests(ctx context.Context) error {
 }
 
 // Check runs the test and lint targets.
-func Check(ctx context.Context) { //nolint:deadcode // Exported for Mage.
+func Check(ctx context.Context) {
 	mg.CtxDeps(ctx, Test, Lint)
 }
 
 // All runs the build, test, and lint targets.
-func All(ctx context.Context) { //nolint:deadcode // Exported for Mage.
+func All(ctx context.Context) {
 	mg.CtxDeps(ctx, Test, Lint)
 }
 
@@ -240,44 +265,64 @@ func Generate(ctx context.Context) {
 	mg.CtxDeps(ctx, Imports)
 }
 
-func installTool(bin, module string) error {
-	if binInfo, err := buildinfo.ReadFile(bin); err != nil {
+func currentFileVersion(bin string) (string, error) {
+	binInfo, err := buildinfo.ReadFile(bin)
+	if err != nil {
 		// Either file doesn't exist or we couldn't read it. Either way, we want to install it.
 		logV("%v\n", err)
 		err = sh.Rm(bin)
 		if err != nil {
-			return err
-		}
-	} else {
-		logV("%s version %s\n", bin, binInfo.Main.Version)
-
-		listOutput, err := sh.Output(mg.GoCmd(), "list", "-f", "{{.Module.Version}}", module)
-		if err != nil {
-			return err
-		}
-		logV("module version %s\n", listOutput)
-
-		if binInfo.Main.Version == listOutput {
-			logV("Command is up to date.\n")
-			return nil
+			return "", err
 		}
 	}
-	logV("Installing\n")
+	logV("%s version %s\n", bin, binInfo.Main.Version)
+	return binInfo.Main.Version, nil
+}
+
+func configuredModuleVersion(module string) (string, error) {
+	listOutput, err := sh.Output(mg.GoCmd(), "list", "-f", "{{.Module.Version}}", module)
+	if err != nil {
+		return "", err
+	}
+	logV("module version %s\n", listOutput)
+	return listOutput, nil
+}
+
+func installTool(bin, module string) error {
+	fileVersion, err := currentFileVersion(bin)
+	if err != nil {
+		return err
+	}
+
+	moduleVersion, err := configuredModuleVersion(module)
+	if err != nil {
+		return err
+	}
+
+	if fileVersion == moduleVersion {
+		logV("Command is up to date.\n")
+		return nil
+	}
+	return installModule(module)
+}
+
+func installModule(module string) error {
+	logV("Installing %s\n", module)
 	gobin, err := filepath.Abs("./bin")
 	if err != nil {
 		return err
 	}
-	return sh.RunWithV(map[string]string{"GOBIN": gobin}, "go", "install", module)
+	return sh.RunWithV(map[string]string{"GOBIN": gobin}, mg.GoCmd(), "install", module)
 }
 
 // Goimports installs the goimports tool.
-func Goimports(ctx context.Context) error {
+func Goimports(context.Context) error {
 	module := "golang.org/x/tools/cmd/goimports"
 	return installTool(goimportsBin(), module)
 }
 
 // Revive installs the revive linting tool.
-func Revive(ctx context.Context) error {
+func Revive(context.Context) error {
 	module := "github.com/mgechev/revive"
 	return installTool(reviveBin(), module)
 }

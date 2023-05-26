@@ -166,6 +166,7 @@ func preprocessAttr(attr slog.Attr, h *LegacyHandler, groups []string) slog.Attr
 	return h.replaceAttr(groups, attr)
 }
 
+//revive:disable-next-line:argument-limit There's lots of state to keep track of.
 func (h *LegacyHandler) attrToJSON(
 	needComma *bool,
 	out *jsoniter.Stream,

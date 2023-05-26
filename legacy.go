@@ -154,20 +154,27 @@ func (h *LegacyHandler) Enabled(_ context.Context, level slog.Level) bool {
 
 const singleSpace = " "
 
-func (h *LegacyHandler) attrToJSON(needComma *bool, out *jsoniter.Stream, attr slog.Attr,
-	beforeWrite writePreparer, groups []string,
-) {
+func preprocessAttr(attr slog.Attr, h *LegacyHandler, groups []string) slog.Attr {
 	if attr.Value.Kind() == slog.KindGroup {
 		if len(attr.Value.Group()) == 0 {
-			// JSONHandler omits empty group attributes,
-			// so we will, too.
-			return
+			// JSONHandler omits empty group attributes, so we will, too.
+			return slog.Attr{}
 		}
-	} else {
-		attr = h.replaceAttr(groups, attr)
-		if attr.Key == "" {
-			return
-		}
+		// Group attributes aren't processed for replacement, for some reason.
+		return attr
+	}
+	return h.replaceAttr(groups, attr)
+}
+
+func (h *LegacyHandler) attrToJSON(
+	needComma *bool,
+	out *jsoniter.Stream,
+	attr slog.Attr,
+	beforeWrite writePreparer,
+	groups []string,
+) {
+	if attr = preprocessAttr(attr, h, groups); attr.Key == "" {
+		return
 	}
 
 	beforeWrite.PrepareToWrite(out, needComma)

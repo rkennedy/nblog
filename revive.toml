@@ -3,6 +3,8 @@ severity = "warning"
 confidence = 0.8
 enableAllRules = true
 
+[rule.add-constant]
+arguments = [{ allowStrs = "\"\"", allowInts = "0,1" }]
 [rule.argument-limit]
 arguments = [4]
 [rule.banned-characters]

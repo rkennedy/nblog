@@ -1,5 +1,6 @@
 package nblog_test
 
+//revive:disable:add-constant,function-length
 import (
 	"io"
 	"strings"
@@ -34,7 +35,8 @@ func (mw *MockWriter) Write(p []byte) (int, error) {
 // buffer for each log message. It should be _once_ to support writers that
 // perform logic between calls to Write. For example, natefinch/lumberjack
 // checks the future log size before each call to Write, which could result in
-// a log message being split acros multiple files.
+// a log message being split acros multiple files. Besides, this is also the
+// documented behavior from [slog.TextHandler.Handle].
 //
 // Subsequent tests using the [LineBuffer] implementation of [io.Writer] rely
 // on this atomic behavior to inspect the output.
@@ -128,7 +130,8 @@ func TestAttributeTypes(t *testing.T) {
 		{slog.Int("int", 234), `"int": 234`},
 		{slog.Int64("int64", -5000000000), `"int64": -5000000000`},
 		{slog.String("string", "some value"), `"string": "some value"`},
-		{slog.Time("time", time.Date(2010, time.June, 4, 10, 34, 23, 14983, time.UTC)), `"time": "2010-06-04 10:34:23.000014983 +0000 UTC"`},
+		{slog.Time("time", time.Date(2010, time.June, 4, 10, 34, 23, 14983, time.UTC)),
+			`"time": "2010-06-04 10:34:23.000014983 +0000 UTC"`},
 		{slog.Uint64("uint64", 6000000000), `"uint64": 6000000000`},
 	}
 
@@ -378,6 +381,11 @@ func TestRemoveAttr(t *testing.T) {
 	))
 }
 
+// TestReplaceTimeField tests replacement of the timestamp field in log records. It defines a replacement function that
+// looks for the special timestamp sentinel and returns an attribute with the replacement value. The timestamp field
+// comes first in the output message, so the test checks that the output has the expected value as a _prefix_.
+//
+//revive:disable-next-line:cognitive-complexity
 func TestReplaceTimeField(t *testing.T) {
 	t.Parallel()
 	replacements := []struct {
@@ -386,7 +394,8 @@ func TestReplaceTimeField(t *testing.T) {
 		ExpectedPrefix string
 	}{
 		// Log timestamp is replaced with time of moon landing.
-		{"withTime", slog.Time("test", time.Date(1969, time.July, 20, 20, 17, 0, 0, time.UTC)), "1969-07-20 20:17:00.000 ["},
+		{"withTime", slog.Time("test", time.Date(1969, time.July, 20, 20, 17, 0, 0, time.UTC)),
+			"1969-07-20 20:17:00.000 ["},
 		// Log timestamp is replaced with other text.
 		{"withOtherValue", slog.String("test", "replacement time"), "replacement time ["},
 		// Log timestamp is omitted entirely.
@@ -399,12 +408,13 @@ func TestReplaceTimeField(t *testing.T) {
 			g := NewWithT(t)
 
 			output := &LineBuffer{}
-			logger := slog.New(nblog.NewHandler(output, nblog.ReplaceAttrs(func(groups []string, attr slog.Attr) slog.Attr {
-				if len(groups) == 0 && attr.Key == nblog.TimeKey {
-					return repl.Replacement
-				}
-				return attr
-			})))
+			logger := slog.New(nblog.NewHandler(output,
+				nblog.ReplaceAttrs(func(groups []string, attr slog.Attr) slog.Attr {
+					if len(groups) == 0 && attr.Key == nblog.TimeKey {
+						return repl.Replacement
+					}
+					return attr
+				})))
 
 			logger.Info("message")
 
@@ -465,7 +475,7 @@ func TestNumericSeverity(t *testing.T) {
 	output := &LineBuffer{}
 	logger := slog.New(nblog.NewHandler(output,
 		nblog.Level(slog.LevelDebug),
-		nblog.NumericSeverity(true),
+		nblog.NumericSeverity(),
 	))
 
 	logger.Debug("debug")

@@ -189,6 +189,7 @@ func (h *LegacyHandler) attrToJSON(
 	*needComma = true
 }
 
+//revive:disable-next-line:function-length There's no good way to make this any shorter.
 func writeAttribute(h *LegacyHandler, attr slog.Attr, out *jsoniter.Stream, groups []string) {
 	switch attr.Value.Kind() {
 	case slog.KindString:
@@ -303,6 +304,8 @@ func (h *LegacyHandler) getCaller(rec slog.Record) string {
 }
 
 // Handle implements [slog.Handler.Handle].
+//
+//revive:disable-next-line:function-length
 func (h *LegacyHandler) Handle(_ context.Context, rec slog.Record) error {
 	var pid, level, message string
 

@@ -5,18 +5,16 @@ package main
 
 import (
 	"context"
-	"debug/buildinfo"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 	"github.com/magefile/mage/target"
+	"github.com/rkennedy/magehelper"
 	"golang.org/x/mod/modfile"
 )
 
@@ -34,48 +32,6 @@ func logV(s string, args ...any) {
 	}
 }
 
-// Package represents the output from go list -json
-type Package struct {
-	Dir        string
-	ImportPath string
-	Name       string
-	Target     string
-
-	GoFiles        []string
-	IgnoredGoFiles []string
-	TestGoFiles    []string
-	XTestGoFiles   []string
-
-	EmbedFiles      []string
-	TestEmbedFiles  []string
-	XTestEmbedFiles []string
-
-	Imports      []string
-	TestImports  []string
-	XTestImports []string
-}
-
-var packages = map[string]Package{}
-
-func loadDependencies(context.Context) error {
-	dependencies, err := sh.Output(mg.GoCmd(), "list", "-json", "./...")
-	if err != nil {
-		return err
-	}
-	dec := json.NewDecoder(strings.NewReader(dependencies))
-	for {
-		var pkg Package
-		switch err = dec.Decode(&pkg); err {
-		case io.EOF:
-			return nil
-		case nil:
-			packages[pkg.ImportPath] = pkg
-		default:
-			return err
-		}
-	}
-}
-
 // Tidy cleans the go.mod file.
 func Tidy(context.Context) error {
 	return sh.RunV(mg.GoCmd(), "mod", "tidy", "-go", "1.20")
@@ -83,7 +39,10 @@ func Tidy(context.Context) error {
 
 // Imports formats the code and updates the import statements.
 func Imports(ctx context.Context) error {
-	mg.CtxDeps(ctx, Goimports, Tidy)
+	mg.CtxDeps(ctx,
+		magehelper.ToolDep(goimportsBin(), "golang.org/x/tools/cmd/goimports"),
+		Tidy,
+	)
 	return sh.RunV(goimportsBin(), "-w", "-l", ".")
 }
 
@@ -100,31 +59,6 @@ func getBasePackage() (string, error) {
 	}
 
 	return modfile.ModulePath(bytes), nil
-}
-
-func (pkg Package) sourceFiles() []string {
-	return append(pkg.GoFiles, pkg.EmbedFiles...)
-}
-
-func (pkg Package) sourceImports() []string {
-	return pkg.Imports
-}
-
-func (pkg Package) testFiles() []string {
-	return append(pkg.TestGoFiles, pkg.XTestGoFiles...)
-}
-
-func (pkg Package) testImports() []string {
-	return append(pkg.TestImports, pkg.XTestImports...)
-}
-
-// indirectGoFiles returns the files that aren't automatically selected as being part of the package proper. If we
-// include _all_ source files here, then Revive interprets each file in isolation, which affects some of its analyses
-// that apply to the package as a whole (such as the package-comments rule). Thus, we use "./..." to request Revive
-// analyze all the package files, and then augment the request with the files from this function get "everything else."
-func (pkg Package) indirectGoFiles() []string {
-	files := append(pkg.TestGoFiles, pkg.XTestGoFiles...)
-	return append(files, pkg.IgnoredGoFiles...)
 }
 
 type set[T comparable] struct {
@@ -146,8 +80,8 @@ func (s *set[T]) Insert(t T) bool {
 
 func getDependencies(
 	baseMod string,
-	files func(pkg Package) []string,
-	imports func(pkg Package) []string,
+	files func(pkg magehelper.Package) []string,
+	imports func(pkg magehelper.Package) []string,
 ) (result []string) {
 	var processedPackages set[string]
 	worklist := []string{baseMod}
@@ -156,7 +90,7 @@ func getDependencies(
 		current := worklist[0]
 		worklist = worklist[1:]
 		if processedPackages.Insert(current) {
-			if pkg, ok := packages[current]; ok {
+			if pkg, ok := magehelper.Packages[current]; ok {
 				result = append(result, expandFiles(pkg, files)...)
 				worklist = append(worklist, imports(pkg)...)
 			}
@@ -166,8 +100,8 @@ func getDependencies(
 }
 
 func expandFiles(
-	pkg Package,
-	files func(pkg Package) []string,
+	pkg magehelper.Package,
+	files func(pkg magehelper.Package) []string,
 ) []string {
 	var result []string
 	for _, gofile := range files(pkg) {
@@ -178,7 +112,11 @@ func expandFiles(
 
 // Lint performs static analysis on all the code in the project.
 func Lint(ctx context.Context) error {
-	mg.CtxDeps(ctx, Generate, Revive, loadDependencies)
+	mg.CtxDeps(ctx,
+		Generate,
+		magehelper.ToolDep(reviveBin(), "github.com/mgechev/revive"),
+		magehelper.LoadDependencies,
+	)
 	pkg, err := getBasePackage()
 	if err != nil {
 		return err
@@ -188,7 +126,7 @@ func Lint(ctx context.Context) error {
 		"-config", "revive.toml",
 		"-set_exit_status",
 		"./...",
-	}, packages[pkg].indirectGoFiles()...)
+	}, magehelper.Packages[pkg].IndirectGoFiles()...)
 	return sh.RunWithV(
 		map[string]string{
 			"REVIVE_FORCE_COLOR": "1",
@@ -200,9 +138,9 @@ func Lint(ctx context.Context) error {
 
 // Test runs unit tests.
 func Test(ctx context.Context) error {
-	mg.CtxDeps(ctx, loadDependencies)
+	mg.CtxDeps(ctx, magehelper.LoadDependencies)
 	tests := []any{}
-	for _, info := range packages {
+	for _, info := range magehelper.Packages {
 		tests = append(tests, mg.F(RunTest, info.ImportPath))
 	}
 	mg.CtxDeps(ctx, tests...)
@@ -211,13 +149,13 @@ func Test(ctx context.Context) error {
 
 // BuildTest builds the specified package's test.
 func BuildTest(ctx context.Context, pkg string) error {
-	mg.CtxDeps(ctx, loadDependencies)
-	deps := getDependencies(pkg, (Package).testFiles, (Package).testImports)
+	mg.CtxDeps(ctx, magehelper.LoadDependencies)
+	deps := getDependencies(pkg, (magehelper.Package).TestFiles, (magehelper.Package).TestImportPackages)
 	if len(deps) == 0 {
 		return nil
 	}
 
-	info := packages[pkg]
+	info := magehelper.Packages[pkg]
 	exe := filepath.Join(info.Dir, info.Name+".test")
 
 	newer, err := target.Path(exe, deps...)
@@ -241,9 +179,9 @@ func RunTest(ctx context.Context, pkg string) error {
 
 // BuildTests build all the tests.
 func BuildTests(ctx context.Context) error {
-	mg.CtxDeps(ctx, loadDependencies)
+	mg.CtxDeps(ctx, magehelper.LoadDependencies)
 	tests := []any{}
-	for _, mod := range packages {
+	for _, mod := range magehelper.Packages {
 		tests = append(tests, mg.F(BuildTest, mod.ImportPath))
 	}
 	mg.CtxDeps(ctx, tests...)
@@ -263,66 +201,4 @@ func All(ctx context.Context) {
 // Generate creates all generated code files.
 func Generate(ctx context.Context) {
 	mg.CtxDeps(ctx, Imports)
-}
-
-func currentFileVersion(bin string) (string, error) {
-	binInfo, err := buildinfo.ReadFile(bin)
-	if err != nil {
-		// Either file doesn't exist or we couldn't read it. Either way, we want to install it.
-		logV("%v\n", err)
-		err = sh.Rm(bin)
-		if err != nil {
-			return "", err
-		}
-	}
-	logV("%s version %s\n", bin, binInfo.Main.Version)
-	return binInfo.Main.Version, nil
-}
-
-func configuredModuleVersion(module string) (string, error) {
-	listOutput, err := sh.Output(mg.GoCmd(), "list", "-f", "{{.Module.Version}}", module)
-	if err != nil {
-		return "", err
-	}
-	logV("module version %s\n", listOutput)
-	return listOutput, nil
-}
-
-func installTool(bin, module string) error {
-	fileVersion, err := currentFileVersion(bin)
-	if err != nil {
-		return err
-	}
-
-	moduleVersion, err := configuredModuleVersion(module)
-	if err != nil {
-		return err
-	}
-
-	if fileVersion == moduleVersion {
-		logV("Command is up to date.\n")
-		return nil
-	}
-	return installModule(module)
-}
-
-func installModule(module string) error {
-	logV("Installing %s\n", module)
-	gobin, err := filepath.Abs("./bin")
-	if err != nil {
-		return err
-	}
-	return sh.RunWithV(map[string]string{"GOBIN": gobin}, mg.GoCmd(), "install", module)
-}
-
-// Goimports installs the goimports tool.
-func Goimports(context.Context) error {
-	module := "golang.org/x/tools/cmd/goimports"
-	return installTool(goimportsBin(), module)
-}
-
-// Revive installs the revive linting tool.
-func Revive(context.Context) error {
-	module := "github.com/mgechev/revive"
-	return installTool(reviveBin(), module)
 }

@@ -8,6 +8,7 @@ require (
 	github.com/magefile/mage v1.15.0
 	github.com/mgechev/revive v1.3.1
 	github.com/onsi/gomega v1.27.6
+	github.com/rkennedy/magehelper v0.0.0-20230527005329-ed823280ed9c
 	github.com/rkennedy/optional v0.0.0-20230425214342-2b4389fe3716
 	golang.org/x/exp v0.0.0-20230425010034-47ecfdc1ba53
 	golang.org/x/mod v0.10.0

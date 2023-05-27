@@ -60,6 +60,7 @@ fi
 
 g sh -x <<END
 set -euo pipefail
+apk add --no-cache git
 if ${update}; then
     go get -u
 fi

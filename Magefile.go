@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/magefile/mage/mg"
 	"github.com/magefile/mage/sh"
 	"github.com/magefile/mage/target"
@@ -61,35 +62,18 @@ func getBasePackage() (string, error) {
 	return modfile.ModulePath(bytes), nil
 }
 
-type set[T comparable] struct {
-	values map[T]any
-}
-
-func (s *set[T]) Insert(t T) bool {
-	if len(s.values) != 0 {
-		_, ok := s.values[t]
-		if ok {
-			return false
-		}
-	} else {
-		s.values = map[T]any{}
-	}
-	s.values[t] = nil
-	return true
-}
-
 func getDependencies(
 	baseMod string,
 	files func(pkg magehelper.Package) []string,
 	imports func(pkg magehelper.Package) []string,
 ) (result []string) {
-	var processedPackages set[string]
+	processedPackages := mapset.NewThreadUnsafeSetWithSize[string](len(magehelper.Packages))
 	worklist := []string{baseMod}
 
 	for len(worklist) > 0 {
 		current := worklist[0]
 		worklist = worklist[1:]
-		if processedPackages.Insert(current) {
+		if processedPackages.Add(current) {
 			if pkg, ok := magehelper.Packages[current]; ok {
 				result = append(result, expandFiles(pkg, files)...)
 				worklist = append(worklist, imports(pkg)...)

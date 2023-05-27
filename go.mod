@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/MakeNowJust/heredoc/v2 v2.0.1
+	github.com/deckarep/golang-set/v2 v2.3.0
 	github.com/json-iterator/go v1.1.12
 	github.com/magefile/mage v1.15.0
 	github.com/mgechev/revive v1.3.1

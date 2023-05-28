@@ -68,15 +68,13 @@ func getDependencies(
 	imports func(pkg magehelper.Package) []string,
 ) (result []string) {
 	processedPackages := mapset.NewThreadUnsafeSetWithSize[string](len(magehelper.Packages))
-	worklist := []string{baseMod}
+	worklist := mapset.NewSet(baseMod)
 
-	for len(worklist) > 0 {
-		current := worklist[0]
-		worklist = worklist[1:]
+	for current, ok := worklist.Pop(); ok; current, ok = worklist.Pop() {
 		if processedPackages.Add(current) {
 			if pkg, ok := magehelper.Packages[current]; ok {
 				result = append(result, expandFiles(pkg, files)...)
-				worklist = append(worklist, imports(pkg)...)
+				worklist.Append(imports(pkg)...)
 			}
 		}
 	}

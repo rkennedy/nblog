@@ -6,8 +6,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
 	"path"
 	"path/filepath"
 
@@ -16,7 +14,6 @@ import (
 	"github.com/magefile/mage/sh"
 	"github.com/magefile/mage/target"
 	"github.com/rkennedy/magehelper"
-	"golang.org/x/mod/modfile"
 )
 
 func goimportsBin() string {
@@ -33,33 +30,12 @@ func logV(s string, args ...any) {
 	}
 }
 
-// Tidy cleans the go.mod file.
-func Tidy(context.Context) error {
-	return sh.RunV(mg.GoCmd(), "mod", "tidy", "-go", "1.20")
-}
-
 // Imports formats the code and updates the import statements.
 func Imports(ctx context.Context) error {
 	mg.CtxDeps(ctx,
 		magehelper.ToolDep(goimportsBin(), "golang.org/x/tools/cmd/goimports"),
-		Tidy,
 	)
 	return sh.RunV(goimportsBin(), "-w", "-l", ".")
-}
-
-func getBasePackage() (string, error) {
-	f, err := os.Open("go.mod")
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-
-	bytes, err := io.ReadAll(f)
-	if err != nil {
-		return "", err
-	}
-
-	return modfile.ModulePath(bytes), nil
 }
 
 func getDependencies(
@@ -96,26 +72,8 @@ func expandFiles(
 func Lint(ctx context.Context) error {
 	mg.CtxDeps(ctx,
 		Generate,
-		magehelper.ToolDep(reviveBin(), "github.com/mgechev/revive"),
-		magehelper.LoadDependencies,
 	)
-	pkg, err := getBasePackage()
-	if err != nil {
-		return err
-	}
-	args := append([]string{
-		"-formatter", "unix",
-		"-config", "revive.toml",
-		"-set_exit_status",
-		"./...",
-	}, magehelper.Packages[pkg].IndirectGoFiles()...)
-	return sh.RunWithV(
-		map[string]string{
-			"REVIVE_FORCE_COLOR": "1",
-		},
-		reviveBin(),
-		args...,
-	)
+	return magehelper.Revive(ctx, reviveBin(), "revive.toml")
 }
 
 // Test runs unit tests.

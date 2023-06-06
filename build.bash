@@ -64,6 +64,7 @@ apk add --no-cache git
 if ${update}; then
     go get -u
 fi
+go mod tidy -go 1.20
 go run mage.go check
 END
 

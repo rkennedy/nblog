@@ -340,7 +340,7 @@ func TestRenameAttr(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	repl := func(groups []string, attr slog.Attr) slog.Attr {
+	repl := func(_ /* groups */ []string, attr slog.Attr) slog.Attr {
 		if attr.Key == "a" {
 			return slog.Attr{
 				Key:   "aa",
@@ -364,7 +364,7 @@ func TestRemoveAttr(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
-	repl := func(groups []string, attr slog.Attr) slog.Attr {
+	repl := func(_ /* groups */ []string, attr slog.Attr) slog.Attr {
 		if attr.Key == "a" {
 			return slog.Attr{}
 		}
@@ -449,13 +449,13 @@ func TestChainingReplacements(t *testing.T) {
 
 	output := &LineBuffer{}
 	logger := slog.New(nblog.NewHandler(output,
-		nblog.ReplaceAttrs(func(g []string, attr slog.Attr) slog.Attr {
+		nblog.ReplaceAttrs(func(_ /* g */ []string, attr slog.Attr) slog.Attr {
 			if attr.Key == "a" {
 				attr.Value = slog.Int64Value(3 + attr.Value.Int64())
 			}
 			return attr
 		}),
-		nblog.ReplaceAttrs(func(g []string, attr slog.Attr) slog.Attr {
+		nblog.ReplaceAttrs(func(_ /* g */ []string, attr slog.Attr) slog.Attr {
 			if attr.Key == "a" || attr.Key == "b" {
 				attr.Value = slog.Int64Value(2 * attr.Value.Int64())
 			}

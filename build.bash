@@ -62,10 +62,14 @@ g sh -x <<END
 set -euo pipefail
 apk add --no-cache git
 if ${update}; then
-    go get -u
+    find -name go.mod -exec /bin/sh -c 'cd \$(dirname {}) && go get -u' ';'
 fi
-go mod tidy -go 1.22
-go run mage.go check
+find -name go.mod -exec /bin/sh -c 'cd \$(dirname {}) && go mod tidy -go 1.22' ';'
+
+mkdir -p bin
+( cd magefiles && go build -o ../bin/mage mage.go; )
+export MAGEFILE_ENABLE_COLOR=1
+./bin/mage check
 END
 
 # vim: et sw=4 ts=4

@@ -18,10 +18,10 @@ go get github.com/rkennedy/nblog
 package main
 
 import (
+	"log/slog"
 	"os"
 
 	"github.com/rkennedy/nblog"
-	"golang.org/x/exp/slog"
 )
 
 func main() {

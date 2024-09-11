@@ -3,6 +3,7 @@ package nblog_test
 //revive:disable:add-constant,function-length
 import (
 	"io"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/MakeNowJust/heredoc/v2"
 	. "github.com/onsi/gomega"
 	"github.com/rkennedy/nblog"
-	"golang.org/x/exp/slog"
 )
 
 const (
@@ -298,8 +298,8 @@ func TestOverrideCallerNameWith(t *testing.T) {
 	))
 }
 
-// TestWithGroup checks that multiple nested levels of
-// [golang.org/x/exp/slog.Logger.WithGroup] appear correctly in the output.
+// TestWithGroup checks that multiple nested levels of [slog.Logger.WithGroup]
+// appear correctly in the output.
 func TestWithGroup(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
@@ -315,9 +315,8 @@ func TestWithGroup(t *testing.T) {
 
 // TestEmptyGroups checks that groups added by WithGroup will appear in the
 // output even when they end up containing no attributes, but that groups added
-// with [golang.org/x/exp/slog.Group] will be omitted when the contain no
-// attributes. This is for consistency with
-// [golang.org/x/exp/slog.JSONHandler].
+// with [slog.Group] will be omitted when the contain no attributes. This is
+// for consistency with [slog.JSONHandler].
 func TestEmptyGroups(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)

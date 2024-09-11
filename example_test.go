@@ -3,11 +3,11 @@ package nblog_test
 //revive:disable:add-constant
 
 import (
+	"log/slog"
 	"os"
 	"time"
 
 	"github.com/rkennedy/nblog"
-	"golang.org/x/exp/slog"
 )
 
 func ExampleLevel() {

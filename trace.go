@@ -2,10 +2,9 @@ package nblog
 
 import (
 	"context"
+	"log/slog"
 	"runtime"
 	"time"
-
-	"golang.org/x/exp/slog"
 )
 
 // TraceStopper is the interface returned by [Trace] to allow callers to stop the trace. Use it with defer. For example:

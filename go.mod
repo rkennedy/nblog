@@ -9,7 +9,6 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/onsi/gomega v1.27.7
 	github.com/rkennedy/optional v0.0.0-20240418015027-ed3078b5a693
-	golang.org/x/exp v0.0.0-20240416160154-fe59bbe5cc7f
 )
 
 require (

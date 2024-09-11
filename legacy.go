@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"runtime"
@@ -14,7 +15,6 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/rkennedy/optional"
-	"golang.org/x/exp/slog"
 )
 
 // ReplaceAttrFunc is the type of callback used with [ReplaceAttrs] to allow

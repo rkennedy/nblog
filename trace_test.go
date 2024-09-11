@@ -1,11 +1,11 @@
 package nblog_test
 
 import (
+	"log/slog"
 	"testing"
 
 	. "github.com/onsi/gomega"
 	"github.com/rkennedy/nblog"
-	"golang.org/x/exp/slog"
 )
 
 func DoTrace(logger *slog.Logger) {

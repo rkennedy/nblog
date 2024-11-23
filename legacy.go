@@ -192,28 +192,30 @@ func (h *LegacyHandler) attrToJSON(
 
 //revive:disable-next-line:function-length There's no good way to make this any shorter.
 func writeAttribute(h *LegacyHandler, attr slog.Attr, out *jsoniter.Stream, groups []string) {
-	switch attr.Value.Kind() {
+	val := attr.Value.Resolve()
+
+	switch val.Kind() {
 	case slog.KindString:
-		out.WriteString(attr.Value.String())
+		out.WriteString(val.String())
 	case slog.KindInt64:
-		out.WriteInt64(attr.Value.Int64())
+		out.WriteInt64(val.Int64())
 	case slog.KindUint64:
-		out.WriteUint64(attr.Value.Uint64())
+		out.WriteUint64(val.Uint64())
 	case slog.KindFloat64:
-		out.WriteFloat64(attr.Value.Float64())
+		out.WriteFloat64(val.Float64())
 	case slog.KindBool:
-		out.WriteBool(attr.Value.Bool())
+		out.WriteBool(val.Bool())
 	case slog.KindDuration:
-		out.WriteString(attr.Value.Duration().String())
+		out.WriteString(val.Duration().String())
 	case slog.KindTime:
-		out.WriteString(attr.Value.Time().String())
+		out.WriteString(val.Time().String())
 	case slog.KindAny:
-		out.WriteVal(attr.Value.Any())
+		out.WriteVal(val.Any())
 	case slog.KindGroup:
 		out.WriteObjectStart()
 		needComma := false
 		thisGroups := append(groups, attr.Key)
-		for _, at := range attr.Value.Group() {
+		for _, at := range val.Group() {
 			h.attrToJSON(&needComma, out, at, &nullWritePreparer{}, thisGroups)
 		}
 		out.WriteObjectEnd()

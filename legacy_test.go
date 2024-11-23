@@ -2,10 +2,14 @@ package nblog_test
 
 //revive:disable:add-constant,function-length
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
+	"testing/slogtest"
 	"time"
 
 	"github.com/MakeNowJust/heredoc/v2"
@@ -488,6 +492,71 @@ func TestNumericSeverity(t *testing.T) {
 		ContainSubstring(" <8> "),
 		ContainSubstring(" <16> "),
 	))
+}
+
+func TestLibrary(t *testing.T) {
+	var buf bytes.Buffer
+
+	newHandler := func(*testing.T) slog.Handler {
+		buf.Reset()
+		return nblog.NewHandler(&buf)
+	}
+
+	parse := func(t *testing.T) map[string]any {
+		// 2024-11-22 15:00:07.398 [1222] <INFO> func16: msg {"G": {"a": "v1", "b": }}
+		line := buf.String()
+		t.Logf("Parsing log message %#v", line)
+		if line[len(line)-1] == '\n' {
+			line = line[:len(line)-1]
+		}
+
+		result := make(map[string]any)
+
+		datetime := strings.SplitN(line, " ", 3)
+		logtime, err := time.Parse(nblog.FullDateFormat, datetime[0]+" "+datetime[1])
+		if err != nil {
+			t.Logf("Could not parse date from message: %s", err.Error())
+			// Assume there is no date.
+		} else {
+			result[slog.TimeKey] = logtime
+			line = datetime[2]
+		}
+
+		components := strings.SplitN(line, " ", 5)
+		switch len(components) {
+		case 4:
+			// No data. Ignore.
+		case 5:
+			// Read additional data
+			err := json.Unmarshal([]byte(components[4]), &result)
+			if err != nil {
+				t.Errorf("Could not parse data component: %s", err.Error())
+			}
+		default:
+			t.Fatalf("Expected 5 components, got %d", len(components))
+		}
+
+		// Read pid
+		i, err := strconv.Atoi(components[0][1 : len(components[0])-1])
+		if err != nil {
+			t.Fatalf("Could not parse pid: %s", err.Error())
+		}
+		result["pid"] = i
+
+		// Read severity
+		severity := components[1][1 : len(components[1])-1]
+		result[slog.LevelKey] = severity
+
+		// Read function
+		result["func"] = components[2]
+
+		// Read message
+		result[slog.MessageKey] = components[3]
+
+		return result
+	}
+
+	slogtest.Run(t, newHandler, parse)
 }
 
 // UniformOutput is a callback function for use with [ReplaceAttrs]. It

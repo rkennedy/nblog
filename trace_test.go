@@ -17,7 +17,7 @@ func TestTrace(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output, nblog.Level(slog.LevelDebug)))
+	logger := slog.New(nblog.New(output, &nblog.HandlerOptions{Level: slog.LevelDebug}))
 
 	DoTrace(logger)
 

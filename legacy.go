@@ -1,232 +1,34 @@
-// Package nblog provides a handler for [slog] that formats logs in the style
-// of Veritas NetBackup log messages.
 package nblog
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"log/slog"
-	"math"
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
-
-	jsoniter "github.com/json-iterator/go"
-	"github.com/rkennedy/optional"
 )
 
-// ReplaceAttrFunc is the type of callback used with [ReplaceAttrs] to allow
-// editing, replacing, or removing of attributes nefore a log record is
-// recorded. The function will be called for each non-group attribute, along
-// with a list of the currently nested groups. The function can return the
-// original attribute to log it as-is, return a different attribute to use it
-// instead, or return an attribute with an empty Key value to omit the current
-// attribute entirely.
-type ReplaceAttrFunc func(groups []string, attr slog.Attr) slog.Attr
+type Handler struct {
+	destination   io.Writer
+	nestedHandler slog.Handler
+	buffer        *bytes.Buffer
+	mutex         *sync.Mutex
 
-// LegacyHandler is an implementation of [slog.Handler] that mimics the format
-// used by legacy NetBackup logging. Attributes, if present, are appended to
-// the line after the given message.
-//
-// If an attribute named “who” is present, it overrides the name of the
-// calling function.
-type LegacyHandler struct {
-	destination       io.Writer
-	level             slog.Leveler
-	timestampFormat   optional.Value[string]
+	replaceAttr       ReplaceAttrFunc
+	timestampFormat   string
 	useFullCallerName bool
-	who               optional.Value[string]
-
-	attrs            *strings.Builder
-	needComma        bool
-	braceLevel       uint
-	groups           []string
-	replaceAttrFuncs []ReplaceAttrFunc
 }
 
-var _ slog.Handler = &LegacyHandler{}
-
-// LegacyOption is a function that applies options to a new [LegacyHandler].
-// Pass instances of this function to [NewHandler]. Use functions like
-// [TimestampFormat] to generate callbacks to apply variable values. Applying
-// LegacyOption values outside the context of NewHandler is not supported.
-type LegacyOption func(handler *LegacyHandler)
-
-// Level returns a [LegacyOption] that will configure a handler to filter out
-// messages with a level lower than the given level.
-func Level(level slog.Leveler) LegacyOption {
-	return func(handler *LegacyHandler) {
-		handler.level = level
-	}
-}
-
-// Formats for use with [TimestampFormat].
+// Formats for use with [HandlerOptions.TimestampFormat].
 const (
 	FullDateFormat = time.DateTime + ".000"
 	TimeOnlyFormat = time.TimeOnly + ".000"
 )
-
-// TimestampFormat returns a [LegacyOption] that will configure a handler to
-// use the given time format (à la [time.Time.Format]) for log timestamps at
-// the start of each record. If left unset, the default used will be
-// [FullDateFormat]. The classic NetBackup format is [TimeOnlyFormat]; use that
-// if log rotation would make the repeated inclusion of the date redundant.
-func TimestampFormat(format string) LegacyOption {
-	return func(handler *LegacyHandler) {
-		handler.timestampFormat = optional.New(format)
-	}
-}
-
-// UseFullCallerName returns a [LegacyOption] that will configure a handler to
-// include or omit the package-name portion of the caller in log messages. The
-// default is to omit the package, so only the function name will appear.
-func UseFullCallerName(use bool) LegacyOption {
-	return func(handler *LegacyHandler) {
-		handler.useFullCallerName = use
-	}
-}
-
-// NumericSeverity configures a handler to record the log level as a number
-// instead of a text label. Numbers used correspond to NetBackup severity
-// levels, not [slog] levels:
-//
-// - LevelDebug: 2
-// - LevelInfo: 4
-// - LevelWarn: 8
-// - LevelError: 16
-func NumericSeverity() LegacyOption {
-	return ReplaceAttrs(replaceNumericSeverity)
-}
-
-// ReplaceAttrs returns a [LegacyOption] that configures a handler to include
-// the given [ReplaceAttrFunc] callback function while processing log
-// attributes prior to being recorded. During log-formatting, callbacks are
-// called in the order they're added to the handler.
-func ReplaceAttrs(replaceAttr ReplaceAttrFunc) LegacyOption {
-	return func(handler *LegacyHandler) {
-		handler.replaceAttrFuncs = append(handler.replaceAttrFuncs, replaceAttr)
-	}
-}
-
-// NewHandler creates a new [LegacyHandler]. It receives a destination
-// [io.Writer] and a list of [LegacyOption] values to configure it.
-func NewHandler(dest io.Writer, options ...LegacyOption) *LegacyHandler {
-	result := &LegacyHandler{
-		destination:       dest,
-		level:             slog.LevelInfo,
-		useFullCallerName: false,
-		attrs:             &strings.Builder{},
-	}
-	ReplaceAttrs(filterCaller)(result)
-	for _, opt := range options {
-		opt(result)
-	}
-	return result
-}
-
-func filterCaller(_ []string, attr slog.Attr) slog.Attr {
-	if attr.Key == "who" {
-		return slog.Attr{}
-	}
-	return attr
-}
-
-func replaceNumericSeverity(groups []string, attr slog.Attr) slog.Attr {
-	if len(groups) == 0 && attr.Key == LevelKey {
-		leveler, ok := attr.Value.Any().(slog.Leveler)
-		if ok {
-			level := leveler.Level()
-			diff := float64(slog.LevelError - slog.LevelWarn)
-			offset := 1 - float64(slog.LevelDebug)/diff
-			newLevel := math.Pow(2, float64(level)/diff+offset) //revive:disable-line:add-constant
-			attr.Value = slog.Float64Value(newLevel)
-		}
-	}
-	return attr
-}
-
-// Enabled implements [slog.Handler.Enabled].
-func (h *LegacyHandler) Enabled(_ context.Context, level slog.Level) bool {
-	return h.level.Level() <= level
-}
-
-const singleSpace = " "
-
-func preprocessAttr(attr slog.Attr, h *LegacyHandler, groups []string) slog.Attr {
-	if attr.Value.Kind() == slog.KindGroup {
-		if len(attr.Value.Group()) == 0 {
-			// JSONHandler omits empty group attributes, so we will, too.
-			return slog.Attr{}
-		}
-		// Group attributes aren't processed for replacement, for some reason.
-		return attr
-	}
-	return h.replaceAttr(groups, attr)
-}
-
-//revive:disable-next-line:argument-limit There's lots of state to keep track of.
-func (h *LegacyHandler) attrToJSON(
-	needComma *bool,
-	out *jsoniter.Stream,
-	attr slog.Attr,
-	beforeWrite writePreparer,
-	groups []string,
-) {
-	if attr = preprocessAttr(attr, h, groups); attr.Key == "" {
-		return
-	}
-
-	beforeWrite.PrepareToWrite(out, needComma)
-
-	if *needComma {
-		out.WriteMore()
-		out.WriteRaw(singleSpace)
-	}
-	writeField(out, attr.Key)
-	writeAttribute(h, attr, out, groups)
-
-	*needComma = true
-}
-
-//revive:disable-next-line:function-length There's no good way to make this any shorter.
-func writeAttribute(h *LegacyHandler, attr slog.Attr, out *jsoniter.Stream, groups []string) {
-	val := attr.Value.Resolve()
-
-	switch val.Kind() {
-	case slog.KindString:
-		out.WriteString(val.String())
-	case slog.KindInt64:
-		out.WriteInt64(val.Int64())
-	case slog.KindUint64:
-		out.WriteUint64(val.Uint64())
-	case slog.KindFloat64:
-		out.WriteFloat64(val.Float64())
-	case slog.KindBool:
-		out.WriteBool(val.Bool())
-	case slog.KindDuration:
-		out.WriteString(val.Duration().String())
-	case slog.KindTime:
-		out.WriteString(val.Time().String())
-	case slog.KindAny:
-		out.WriteVal(val.Any())
-	case slog.KindGroup:
-		out.WriteObjectStart()
-		needComma := false
-		thisGroups := append(groups, attr.Key)
-		for _, at := range val.Group() {
-			h.attrToJSON(&needComma, out, at, &nullWritePreparer{}, thisGroups)
-		}
-		out.WriteObjectEnd()
-	}
-}
-
-func cloneBuilder(b *strings.Builder) *strings.Builder {
-	result := &strings.Builder{}
-	_, _ = result.WriteString(b.String())
-	return result
-}
 
 // When formatting a message, the handler calls any [ReplaceAttrFunc] callbacks
 // on any attributes associated with the message. It will synthesize attributes
@@ -241,206 +43,269 @@ func cloneBuilder(b *strings.Builder) *strings.Builder {
 // option. Othe types for “time,” as well as other synthetic attributes, are
 // recorded in the log with [slog.Value.String].
 const (
-	TimeKey    = "time-75972059-5741-41f7-9248-e8594177835c"  // message timestamp
-	PidKey     = "pid-47482072-7496-40a0-a048-ccfdba4e564e"   // process ID
-	LevelKey   = "level-933f69a5-69b4-4f8a-a6a6-14810b97fdad" // severity level
-	MessageKey = "message-5ae1bf30-54b2-4d50-8af7-7076b3a39e20"
+	PidKey = "pid-47482072-7496-40a0-a048-ccfdba4e564e" // process ID
 )
 
-func concatNonempty(strs ...string) (result []string) {
-	for _, value := range strs {
-		if value != "" {
-			result = append(result, value)
-		}
-	}
-	return result
+// HandlerOptions describes the options available for nblog logger options. The
+// AddSource, Level, and ReplaceAttr fields are as for [slog.HandlerOptions].
+type HandlerOptions struct {
+	AddSource   bool
+	Level       slog.Leveler
+	ReplaceAttr ReplaceAttrFunc
+
+	// TimestampFormat specifies the [time] format used for formatting
+	// timestamps (à la [time.Time.Format]) in the logger output. If left
+	// unset, the default used will be [FullDateFormat]. The classic
+	// NetBackup format is [TimeOnlyFormat]; use that if log rotation would
+	// make the repeated inclusion of the date redundant.
+	TimestampFormat string
+
+	// UseFullCallerName determines whether to include or omit the
+	// package-name portion of the caller in log messages. The default is
+	// to omit the package, so only the function name will appear.
+	UseFullCallerName bool
+
+	// NumericSeverity configures the handler to record
+	// the log level as a number instead of a text label.
+	// Numbers used correspond to NetBackup severity
+	// levels, not [slog] levels:
+	//
+	// - LevelDebug: 2
+	// - LevelInfo: 4
+	// - LevelWarn: 8
+	// - LevelError: 16
+	NumericSeverity bool
 }
 
-func (h *LegacyHandler) replaceAttr(groups []string, attr slog.Attr) slog.Attr {
-	for _, fn := range h.replaceAttrFuncs {
-		attr = fn(groups, attr)
-		if attr.Key == "" {
-			break
-		}
+// New creates a new [Handler]. It receives a destination [io.Writer] and
+// options to configure it.
+func New(w io.Writer, handlerOptions *HandlerOptions) *Handler {
+	if handlerOptions == nil {
+		handlerOptions = &HandlerOptions{}
 	}
-	return attr
+
+	buf := &bytes.Buffer{}
+	handler := &Handler{
+		destination: w,
+		nestedHandler: slog.NewJSONHandler(buf, &slog.HandlerOptions{
+			Level:       handlerOptions.Level,
+			AddSource:   handlerOptions.AddSource,
+			ReplaceAttr: ChainReplace(suppressDefaults, handlerOptions.ReplaceAttr),
+		}),
+		buffer: buf,
+		mutex:  &sync.Mutex{},
+
+		replaceAttr:       handlerOptions.ReplaceAttr,
+		timestampFormat:   FullDateFormat,
+		useFullCallerName: handlerOptions.UseFullCallerName,
+	}
+	if handlerOptions.TimestampFormat != "" {
+		handler.timestampFormat = handlerOptions.TimestampFormat
+	}
+	if handlerOptions.NumericSeverity {
+		handler.replaceAttr = ChainReplace(handler.replaceAttr, replaceNumericSeverity)
+	}
+
+	return handler
 }
 
-const jsonStreamSize = 50 // The size is arbitrary.
-
-func (h *LegacyHandler) getTime(rec slog.Record) string {
-	if rec.Time.IsZero() {
-		return ""
-	}
-	format := h.timestampFormat.OrElse(FullDateFormat)
-	timeAttr := h.replaceAttr(nil, slog.Time(TimeKey, rec.Time))
-	if timeAttr.Key == "" {
-		return ""
-	}
-	if timeAttr.Value.Kind() == slog.KindTime {
-		return timeAttr.Value.Time().Format(format)
-	}
-	return timeAttr.Value.String()
-}
-
-func (h *LegacyHandler) getCaller(rec slog.Record) string {
-	who := h.who
-	rec.Attrs(func(attr slog.Attr) bool {
-		if attr.Key == "who" {
-			who = optional.New(attr.Value.String())
-			return false
-		}
-		return true
-	})
-	return who.OrElseGet(func() string {
-		frames := runtime.CallersFrames([]uintptr{rec.PC})
-		frame, _ := frames.Next()
-		who := frame.Function
-		if !h.useFullCallerName {
-			lastDot := strings.LastIndex(who, ".")
-			if lastDot >= 0 {
-				who = who[lastDot+1:]
-			}
-		}
-		return who
-	})
-}
-
-// Handle implements [slog.Handler.Handle].
-//
-//revive:disable-next-line:function-length
-func (h *LegacyHandler) Handle(_ context.Context, rec slog.Record) error {
-	var pid, level, message string
-
-	if pidAttr := h.replaceAttr(nil, slog.Int(PidKey, os.Getpid())); pidAttr.Key != "" {
-		pid = fmt.Sprintf("[%s]", pidAttr.Value.String())
-	}
-
-	if levelAttr := h.replaceAttr(nil, slog.Any(LevelKey, rec.Level)); levelAttr.Key != "" {
-		level = fmt.Sprintf("<%s>", levelAttr.Value.String())
-	}
-
-	if messageAttr := h.replaceAttr(nil, slog.String(MessageKey, rec.Message)); messageAttr.Key != "" {
-		message = messageAttr.Value.String()
-	}
-
-	attributeBuffer := cloneBuilder(h.attrs)
-	h.formatUserAttributes(attributeBuffer, rec)
-
-	parts := concatNonempty(
-		h.getTime(rec),
-		pid,
-		level,
-		h.getCaller(rec)+":",
-		message,
-		attributeBuffer.String(),
-	)
-
-	_, err := fmt.Fprintln(h.destination, strings.Join(parts, singleSpace))
-	return err
-}
-
-// formatUserAttributes formats any attributes provided in the immediate Log function.
-func (h *LegacyHandler) formatUserAttributes(buffer io.Writer, rec slog.Record) {
-	out := jsoniter.NewStream(jsoniter.ConfigDefault, buffer, jsonStreamSize)
-	defer out.Flush()
-	braceLevel := h.braceLevel
-	needComma := h.needComma
-
-	beforeWrite := mainWritePreparer{
-		outputEmpty: h.attrs.Len() == 0,
-		braceLevel:  &braceLevel,
-	}
-
-	rec.Attrs(func(attr slog.Attr) bool {
-		h.attrToJSON(&needComma, out, attr, &beforeWrite, h.groups)
-		return true
-	})
-	for ; braceLevel > 0; braceLevel-- {
-		out.WriteObjectEnd()
-	}
-}
-
-type writePreparer interface {
-	PrepareToWrite(out *jsoniter.Stream, needComma *bool)
-}
-
-type mainWritePreparer struct {
-	outputEmpty bool
-	braceLevel  *uint
-}
-
-func (prep *mainWritePreparer) PrepareToWrite(out *jsoniter.Stream, needComma *bool) {
-	if prep.outputEmpty {
-		prep.outputEmpty = false
-		out.WriteObjectStart()
-		*prep.braceLevel++
-		*needComma = false
-	}
-}
-
-type nullWritePreparer struct {
-}
-
-func (*nullWritePreparer) PrepareToWrite(*jsoniter.Stream, *bool) {
+// Enabled implements [slog.Handler.Enabled].
+func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.nestedHandler.Enabled(ctx, level)
 }
 
 // WithAttrs implements [slog.Handler.WithAttrs].
-func (h *LegacyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	result := &LegacyHandler{
-		destination:      h.destination,
-		level:            h.level,
-		who:              h.who,
-		attrs:            cloneBuilder(h.attrs),
-		needComma:        h.needComma,
-		braceLevel:       h.braceLevel,
-		groups:           h.groups,
-		replaceAttrFuncs: h.replaceAttrFuncs,
+func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &Handler{
+		nestedHandler:   h.nestedHandler.WithAttrs(attrs),
+		destination:     h.destination,
+		buffer:          h.buffer,
+		mutex:           h.mutex,
+		replaceAttr:     h.replaceAttr,
+		timestampFormat: h.timestampFormat,
 	}
-	out := jsoniter.NewStream(jsoniter.ConfigDefault, result.attrs, jsonStreamSize)
-	defer out.Flush()
-
-	beforeWrite := mainWritePreparer{
-		outputEmpty: result.attrs.Len() == 0,
-		braceLevel:  &result.braceLevel,
-	}
-
-	for _, attr := range attrs {
-		if attr.Key == "who" {
-			result.who = optional.New(attr.Value.String())
-		} else {
-			result.attrToJSON(&result.needComma, out, attr, &beforeWrite, result.groups)
-		}
-	}
-	return result
-}
-
-func writeField(out *jsoniter.Stream, name string) {
-	out.WriteObjectField(name)
-	out.WriteRaw(singleSpace)
 }
 
 // WithGroup implements [slog.Handler.WithGroup].
-func (h *LegacyHandler) WithGroup(name string) slog.Handler {
-	result := &LegacyHandler{
-		destination: h.destination,
-		level:       h.level,
-		who:         h.who,
-		attrs:       cloneBuilder(h.attrs),
-		needComma:   false,
-		braceLevel:  h.braceLevel,
+func (h *Handler) WithGroup(name string) slog.Handler {
+	return &Handler{
+		nestedHandler:   h.nestedHandler.WithGroup(name),
+		destination:     h.destination,
+		buffer:          h.buffer,
+		mutex:           h.mutex,
+		replaceAttr:     h.replaceAttr,
+		timestampFormat: h.timestampFormat,
 	}
-	out := jsoniter.NewStream(jsoniter.ConfigDefault, result.attrs, jsonStreamSize)
-	defer out.Flush()
-	if result.attrs.Len() == 0 {
-		out.WriteObjectStart()
-		result.braceLevel++
-	} else if h.needComma {
-		out.WriteMore()
-		out.WriteRaw(singleSpace)
+}
+
+func (h *Handler) computeAttrs(
+	ctx context.Context,
+	record slog.Record,
+) ([]byte, error) {
+	h.mutex.Lock()
+	defer func() {
+		h.buffer.Reset()
+		h.mutex.Unlock()
+	}()
+
+	// We "compute" the attributes by making the nested JSONHandler print
+	// the log message to our internal buffer, and then we parse that
+	// output back into a map of attributes. We don't just use the
+	// serialized output from the nested logger in our outbut because we
+	// want to make the output a little nicer by adding spaces between keys
+	// and values.
+	if err := h.nestedHandler.Handle(ctx, record); err != nil {
+		return nil, fmt.Errorf("error when calling inner handler's Handle: %w", err)
 	}
-	writeField(out, name)
-	out.WriteObjectStart()
-	result.braceLevel++
-	return result
+
+	return h.buffer.Bytes(), nil
+	/*
+		var attrs map[string]any
+		err := json.Unmarshal(h.buffer.Bytes(), &attrs)
+		if err != nil {
+			return nil, fmt.Errorf("error when unmarshaling inner handler's Handle result: %w", err)
+		}
+		return attrs, nil
+	*/
+}
+
+func getCaller(rec slog.Record, useFullCallerName bool) string {
+	frames := runtime.CallersFrames([]uintptr{rec.PC})
+	frame, _ := frames.Next()
+	who := frame.Function
+	if !useFullCallerName {
+		lastDot := strings.LastIndex(who, ".")
+		if lastDot >= 0 {
+			who = who[lastDot+1:]
+		}
+	}
+	return who
+}
+
+func writeNonemptySeparated(out io.StringWriter, sep string, components ...string) error {
+	needSep := false
+	for _, comp := range components {
+		if comp == "" {
+			continue
+		}
+		if needSep {
+			_, err := out.WriteString(sep)
+			if err != nil {
+				return err
+			}
+		}
+		_, err := out.WriteString(comp)
+		if err != nil {
+			return err
+		}
+		needSep = true
+	}
+	return nil
+}
+
+// Handle implements [slog.Handler.Handle].
+func (h *Handler) Handle(ctx context.Context, record slog.Record) error {
+	var level string
+	levelAttr := slog.Attr{
+		Key:   slog.LevelKey,
+		Value: slog.AnyValue(record.Level),
+	}
+	if h.replaceAttr != nil {
+		levelAttr = h.replaceAttr([]string{}, levelAttr)
+	}
+	if !levelAttr.Equal(slog.Attr{}) {
+		level = "<" + levelAttr.Value.String() + ">"
+	}
+
+	var timestamp string
+	if !record.Time.IsZero() {
+		timeAttr := slog.Time(slog.TimeKey, record.Time)
+		if h.replaceAttr != nil {
+			timeAttr = h.replaceAttr([]string{}, timeAttr)
+		}
+		if !timeAttr.Equal(slog.Attr{}) {
+			if timeAttr.Value.Kind() == slog.KindTime {
+				timestamp = timeAttr.Value.Time().Format(h.timestampFormat)
+			} else {
+				timestamp = timeAttr.Value.String()
+			}
+		}
+	}
+
+	var pid string
+	pidAttr := slog.Attr{
+		Key:   PidKey,
+		Value: slog.IntValue(os.Getpid()),
+	}
+	if h.replaceAttr != nil {
+		pidAttr = h.replaceAttr([]string{}, pidAttr)
+	}
+	if !pidAttr.Equal(slog.Attr{}) {
+		pid = "[" + pidAttr.Value.String() + "]"
+	}
+
+	var caller string
+	if record.PC != 0 {
+		caller = getCaller(record, h.useFullCallerName) + ":"
+	}
+
+	var msg string
+	msgAttr := slog.Attr{
+		Key:   slog.MessageKey,
+		Value: slog.StringValue(record.Message),
+	}
+	if h.replaceAttr != nil {
+		msgAttr = h.replaceAttr([]string{}, msgAttr)
+	}
+	if !msgAttr.Equal(slog.Attr{}) {
+		msg = msgAttr.Value.String()
+	}
+
+	attrsAsBytes, err := h.computeAttrs(ctx, record)
+	if err != nil {
+		return err
+	}
+
+	/*
+		var attrsAsBytes []byte
+		if len(attrs) > 0 {
+			// TODO (rkennedy) Marshal JSON with nicer format.
+			attrsAsBytes, err = json.Marshal(attrs)
+			if err != nil {
+				return fmt.Errorf("error when marshaling attrs: %w", err)
+			}
+		}
+	*/
+	if attrsAsBytes[len(attrsAsBytes)-1] == '\n' {
+		attrsAsBytes = attrsAsBytes[0 : len(attrsAsBytes)-1]
+	}
+	if string(attrsAsBytes) == "{}" {
+		attrsAsBytes = nil
+	}
+
+	out := strings.Builder{}
+	err = writeNonemptySeparated(&out, " ",
+		timestamp,
+		pid,
+		level,
+		caller,
+		msg,
+		// TODO (rkennedy) This is a hack because JSON formatting is broken.
+		strings.ReplaceAll(strings.ReplaceAll(string(attrsAsBytes), "\":", "\": "), ",\"", ", \""),
+	)
+	if err != nil {
+		return err
+	}
+
+	_, err = io.WriteString(h.destination, out.String()+"\n")
+	return err
+}
+
+func suppressDefaults(groups []string, a slog.Attr) slog.Attr {
+	if a.Key == slog.TimeKey ||
+		a.Key == slog.LevelKey ||
+		a.Key == slog.MessageKey {
+		return slog.Attr{}
+	}
+	return a
 }

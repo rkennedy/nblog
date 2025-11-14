@@ -11,10 +11,10 @@ import (
 )
 
 func ExampleLevel() {
-	handler := nblog.NewHandler(os.Stdout,
-		nblog.Level(slog.LevelWarn),
-		nblog.ReplaceAttrs(UniformOutput),
-	)
+	handler := nblog.New(os.Stdout, &nblog.HandlerOptions{
+		Level:       slog.LevelWarn,
+		ReplaceAttr: UniformOutput,
+	})
 	logger := slog.New(handler)
 	logger.Info("info message")
 	logger.Warn("warning message")
@@ -22,39 +22,40 @@ func ExampleLevel() {
 }
 
 func ExampleTimestampFormat() {
-	handler := nblog.NewHandler(os.Stdout,
-		nblog.TimestampFormat(time.RFC850),
-		nblog.ReplaceAttrs(UniformOutput),
-	)
+	handler := nblog.New(os.Stdout, &nblog.HandlerOptions{
+		TimestampFormat: time.RFC850,
+		ReplaceAttr:     UniformOutput,
+	})
 	logger := slog.New(handler)
 	logger.Info("info message")
 	// Output: Monday, 02-Jan-06 15:04:05 UTC [42] <INFO> ExampleTimestampFormat: info message
 }
 
 func ExampleUseFullCallerName_true() {
-	handler := nblog.NewHandler(os.Stdout,
-		nblog.UseFullCallerName(true),
-		nblog.ReplaceAttrs(UniformOutput),
-	)
+	handler := nblog.New(os.Stdout, &nblog.HandlerOptions{
+		UseFullCallerName: true,
+		ReplaceAttr:       UniformOutput,
+	})
 	logger := slog.New(handler)
 	logger.Info("info")
 	// Output: 2006-01-02 15:04:05.000 [42] <INFO> github.com/rkennedy/nblog_test.ExampleUseFullCallerName_true: info
 }
 
 func ExampleUseFullCallerName_false() {
-	handler := nblog.NewHandler(os.Stdout,
-		nblog.UseFullCallerName(false),
-		nblog.ReplaceAttrs(UniformOutput),
-	)
+	handler := nblog.New(os.Stdout, &nblog.HandlerOptions{
+		UseFullCallerName: false,
+		ReplaceAttr:       UniformOutput,
+	})
 	logger := slog.New(handler)
 	logger.Info("info message")
 	// Output: 2006-01-02 15:04:05.000 [42] <INFO> ExampleUseFullCallerName_false: info message
 }
 
 func ExampleTrace() {
-	logger := slog.New(nblog.NewHandler(os.Stdout,
-		nblog.Level(slog.LevelDebug),
-		nblog.ReplaceAttrs(UniformOutput)))
+	logger := slog.New(nblog.New(os.Stdout, &nblog.HandlerOptions{
+		Level:       slog.LevelDebug,
+		ReplaceAttr: UniformOutput,
+	}))
 	defer nblog.Trace(logger).Stop()
 	logger.Info("message")
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/rkennedy/nblog"
 )
 
-func ExampleLevel() {
+func ExampleHandlerOptions_Level() {
 	handler := nblog.New(os.Stdout, &nblog.HandlerOptions{
 		Level:       slog.LevelWarn,
 		ReplaceAttr: UniformOutput,
@@ -18,37 +18,37 @@ func ExampleLevel() {
 	logger := slog.New(handler)
 	logger.Info("info message")
 	logger.Warn("warning message")
-	// Output: 2006-01-02 15:04:05.000 [42] <WARN> ExampleLevel: warning message
+	// Output: 2006-01-02 15:04:05.000 [42] <WARN> ExampleHandlerOptions_Level: warning message
 }
 
-func ExampleTimestampFormat() {
+func ExampleHandlerOptions_TimestampFormat() {
 	handler := nblog.New(os.Stdout, &nblog.HandlerOptions{
 		TimestampFormat: time.RFC850,
 		ReplaceAttr:     UniformOutput,
 	})
 	logger := slog.New(handler)
 	logger.Info("info message")
-	// Output: Monday, 02-Jan-06 15:04:05 UTC [42] <INFO> ExampleTimestampFormat: info message
+	// Output: Monday, 02-Jan-06 15:04:05 UTC [42] <INFO> ExampleHandlerOptions_TimestampFormat: info message
 }
 
-func ExampleUseFullCallerName_true() {
+func ExampleHandlerOptions_UseFullCallerName_true() {
 	handler := nblog.New(os.Stdout, &nblog.HandlerOptions{
 		UseFullCallerName: true,
 		ReplaceAttr:       UniformOutput,
 	})
 	logger := slog.New(handler)
 	logger.Info("info")
-	// Output: 2006-01-02 15:04:05.000 [42] <INFO> github.com/rkennedy/nblog_test.ExampleUseFullCallerName_true: info
+	// Output: 2006-01-02 15:04:05.000 [42] <INFO> github.com/rkennedy/nblog_test.ExampleHandlerOptions_UseFullCallerName_true: info
 }
 
-func ExampleUseFullCallerName_false() {
+func ExampleHandlerOptions_UseFullCallerName_false() {
 	handler := nblog.New(os.Stdout, &nblog.HandlerOptions{
 		UseFullCallerName: false,
 		ReplaceAttr:       UniformOutput,
 	})
 	logger := slog.New(handler)
 	logger.Info("info message")
-	// Output: 2006-01-02 15:04:05.000 [42] <INFO> ExampleUseFullCallerName_false: info message
+	// Output: 2006-01-02 15:04:05.000 [42] <INFO> ExampleHandlerOptions_UseFullCallerName_false: info message
 }
 
 func ExampleTrace() {

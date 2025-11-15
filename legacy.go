@@ -1,28 +1,16 @@
 package nblog
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
+
+	jsoniter "github.com/json-iterator/go"
 )
-
-type Handler struct {
-	destination   io.Writer
-	nestedHandler slog.Handler
-	buffer        *bytes.Buffer
-	mutex         *sync.Mutex
-
-	replaceAttr       ReplaceAttrFunc
-	timestampFormat   string
-	useFullCallerName bool
-}
 
 // Formats for use with [HandlerOptions.TimestampFormat].
 const (
@@ -45,6 +33,19 @@ const (
 const (
 	PidKey = "pid-47482072-7496-40a0-a048-ccfdba4e564e" // process ID
 )
+
+type Handler struct {
+	destination io.Writer
+
+	level             slog.Leveler
+	replaceAttr       ReplaceAttrFunc
+	timestampFormat   string
+	useFullCallerName bool
+
+	previousHandler *Handler
+	group           string
+	attributes      []slog.Attr
+}
 
 // HandlerOptions describes the options available for nblog logger options. The
 // AddSource, Level, and ReplaceAttr fields are as for [slog.HandlerOptions].
@@ -79,30 +80,26 @@ type HandlerOptions struct {
 
 // New creates a new [Handler]. It receives a destination [io.Writer] and
 // options to configure it.
-func New(w io.Writer, handlerOptions *HandlerOptions) *Handler {
-	if handlerOptions == nil {
-		handlerOptions = &HandlerOptions{}
+func New(w io.Writer, opts *HandlerOptions) *Handler {
+	if opts == nil {
+		opts = &HandlerOptions{}
 	}
 
-	buf := &bytes.Buffer{}
 	handler := &Handler{
 		destination: w,
-		nestedHandler: slog.NewJSONHandler(buf, &slog.HandlerOptions{
-			Level:       handlerOptions.Level,
-			AddSource:   handlerOptions.AddSource,
-			ReplaceAttr: ChainReplace(suppressDefaults, handlerOptions.ReplaceAttr),
-		}),
-		buffer: buf,
-		mutex:  &sync.Mutex{},
 
-		replaceAttr:       handlerOptions.ReplaceAttr,
+		level:             slog.LevelInfo,
+		replaceAttr:       ChainReplace(opts.ReplaceAttr, nil),
 		timestampFormat:   FullDateFormat,
-		useFullCallerName: handlerOptions.UseFullCallerName,
+		useFullCallerName: opts.UseFullCallerName,
 	}
-	if handlerOptions.TimestampFormat != "" {
-		handler.timestampFormat = handlerOptions.TimestampFormat
+	if opts.Level != nil {
+		handler.level = opts.Level
 	}
-	if handlerOptions.NumericSeverity {
+	if opts.TimestampFormat != "" {
+		handler.timestampFormat = opts.TimestampFormat
+	}
+	if opts.NumericSeverity {
 		handler.replaceAttr = ChainReplace(handler.replaceAttr, replaceNumericSeverity)
 	}
 
@@ -110,202 +107,276 @@ func New(w io.Writer, handlerOptions *HandlerOptions) *Handler {
 }
 
 // Enabled implements [slog.Handler.Enabled].
-func (h *Handler) Enabled(ctx context.Context, level slog.Level) bool {
-	return h.nestedHandler.Enabled(ctx, level)
+func (h *Handler) Enabled(_ context.Context, alev slog.Level) bool {
+	return alev >= level(h).Level()
 }
 
 // WithAttrs implements [slog.Handler.WithAttrs].
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return h
+	}
 	return &Handler{
-		nestedHandler:   h.nestedHandler.WithAttrs(attrs),
-		destination:     h.destination,
-		buffer:          h.buffer,
-		mutex:           h.mutex,
-		replaceAttr:     h.replaceAttr,
-		timestampFormat: h.timestampFormat,
+		previousHandler: h,
+		attributes:      attrs,
 	}
 }
 
 // WithGroup implements [slog.Handler.WithGroup].
 func (h *Handler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
+	}
 	return &Handler{
-		nestedHandler:   h.nestedHandler.WithGroup(name),
-		destination:     h.destination,
-		buffer:          h.buffer,
-		mutex:           h.mutex,
-		replaceAttr:     h.replaceAttr,
-		timestampFormat: h.timestampFormat,
+		previousHandler: h,
+		group:           name,
 	}
 }
 
-func (h *Handler) computeAttrs(
-	ctx context.Context,
-	record slog.Record,
-) ([]byte, error) {
-	h.mutex.Lock()
-	defer func() {
-		h.buffer.Reset()
-		h.mutex.Unlock()
-	}()
-
-	// We "compute" the attributes by making the nested JSONHandler print
-	// the log message to our internal buffer, and then we parse that
-	// output back into a map of attributes. We don't just use the
-	// serialized output from the nested logger in our outbut because we
-	// want to make the output a little nicer by adding spaces between keys
-	// and values.
-	if err := h.nestedHandler.Handle(ctx, record); err != nil {
-		return nil, fmt.Errorf("error when calling inner handler's Handle: %w", err)
+func writeTimestamp(out io.StringWriter, h *Handler, rec slog.Record) error {
+	if rec.Time.IsZero() {
+		return nil
 	}
-
-	return h.buffer.Bytes(), nil
-	/*
-		var attrs map[string]any
-		err := json.Unmarshal(h.buffer.Bytes(), &attrs)
-		if err != nil {
-			return nil, fmt.Errorf("error when unmarshaling inner handler's Handle result: %w", err)
-		}
-		return attrs, nil
-	*/
+	timeAttr := slog.Time(slog.TimeKey, rec.Time)
+	timeAttr = replaceAttr(h)([]string{}, timeAttr)
+	if timeAttr.Equal(slog.Attr{}) {
+		return nil
+	}
+	var timestamp string
+	if timeAttr.Value.Kind() == slog.KindTime {
+		timestamp = timeAttr.Value.Time().Format(timestampFormat(h))
+	} else {
+		timestamp = timeAttr.Value.String()
+	}
+	_, err := out.WriteString(timestamp + " ")
+	return err
 }
 
-func getCaller(rec slog.Record, useFullCallerName bool) string {
+func writePid(out io.StringWriter, h *Handler) error {
+	pidAttr := slog.Attr{
+		Key:   PidKey,
+		Value: slog.IntValue(os.Getpid()),
+	}
+	pidAttr = replaceAttr(h)([]string{}, pidAttr)
+	if pidAttr.Equal(slog.Attr{}) {
+		return nil
+	}
+	_, err := out.WriteString("[" + pidAttr.Value.String() + "] ")
+	return err
+}
+
+func writeLevel(out io.StringWriter, h *Handler, rec slog.Record) error {
+	levelAttr := slog.Attr{
+		Key:   slog.LevelKey,
+		Value: slog.AnyValue(rec.Level),
+	}
+	levelAttr = replaceAttr(h)([]string{}, levelAttr)
+	if levelAttr.Equal(slog.Attr{}) {
+		return nil
+	}
+	_, err := out.WriteString("<" + levelAttr.Value.String() + "> ")
+	return err
+}
+
+func writeCaller(out io.StringWriter, h *Handler, rec slog.Record) error {
+	if rec.PC == 0 {
+		return nil
+	}
+
 	frames := runtime.CallersFrames([]uintptr{rec.PC})
 	frame, _ := frames.Next()
 	who := frame.Function
-	if !useFullCallerName {
+	if !useFullCallerName(h) {
 		lastDot := strings.LastIndex(who, ".")
 		if lastDot >= 0 {
 			who = who[lastDot+1:]
 		}
 	}
-	return who
-}
-
-func writeNonemptySeparated(out io.StringWriter, sep string, components ...string) error {
-	needSep := false
-	for _, comp := range components {
-		if comp == "" {
-			continue
-		}
-		if needSep {
-			_, err := out.WriteString(sep)
-			if err != nil {
-				return err
-			}
-		}
-		_, err := out.WriteString(comp)
-		if err != nil {
-			return err
-		}
-		needSep = true
-	}
-	return nil
-}
-
-// Handle implements [slog.Handler.Handle].
-func (h *Handler) Handle(ctx context.Context, record slog.Record) error {
-	var level string
-	levelAttr := slog.Attr{
-		Key:   slog.LevelKey,
-		Value: slog.AnyValue(record.Level),
-	}
-	if h.replaceAttr != nil {
-		levelAttr = h.replaceAttr([]string{}, levelAttr)
-	}
-	if !levelAttr.Equal(slog.Attr{}) {
-		level = "<" + levelAttr.Value.String() + ">"
-	}
-
-	var timestamp string
-	if !record.Time.IsZero() {
-		timeAttr := slog.Time(slog.TimeKey, record.Time)
-		if h.replaceAttr != nil {
-			timeAttr = h.replaceAttr([]string{}, timeAttr)
-		}
-		if !timeAttr.Equal(slog.Attr{}) {
-			if timeAttr.Value.Kind() == slog.KindTime {
-				timestamp = timeAttr.Value.Time().Format(h.timestampFormat)
-			} else {
-				timestamp = timeAttr.Value.String()
-			}
-		}
-	}
-
-	var pid string
-	pidAttr := slog.Attr{
-		Key:   PidKey,
-		Value: slog.IntValue(os.Getpid()),
-	}
-	if h.replaceAttr != nil {
-		pidAttr = h.replaceAttr([]string{}, pidAttr)
-	}
-	if !pidAttr.Equal(slog.Attr{}) {
-		pid = "[" + pidAttr.Value.String() + "]"
-	}
-
-	var caller string
-	if record.PC != 0 {
-		caller = getCaller(record, h.useFullCallerName) + ":"
-	}
-
-	var msg string
-	msgAttr := slog.Attr{
-		Key:   slog.MessageKey,
-		Value: slog.StringValue(record.Message),
-	}
-	if h.replaceAttr != nil {
-		msgAttr = h.replaceAttr([]string{}, msgAttr)
-	}
-	if !msgAttr.Equal(slog.Attr{}) {
-		msg = msgAttr.Value.String()
-	}
-
-	attrsAsBytes, err := h.computeAttrs(ctx, record)
-	if err != nil {
-		return err
-	}
-
-	/*
-		var attrsAsBytes []byte
-		if len(attrs) > 0 {
-			// TODO (rkennedy) Marshal JSON with nicer format.
-			attrsAsBytes, err = json.Marshal(attrs)
-			if err != nil {
-				return fmt.Errorf("error when marshaling attrs: %w", err)
-			}
-		}
-	*/
-	if attrsAsBytes[len(attrsAsBytes)-1] == '\n' {
-		attrsAsBytes = attrsAsBytes[0 : len(attrsAsBytes)-1]
-	}
-	if string(attrsAsBytes) == "{}" {
-		attrsAsBytes = nil
-	}
-
-	out := strings.Builder{}
-	err = writeNonemptySeparated(&out, " ",
-		timestamp,
-		pid,
-		level,
-		caller,
-		msg,
-		// TODO (rkennedy) This is a hack because JSON formatting is broken.
-		strings.ReplaceAll(strings.ReplaceAll(string(attrsAsBytes), "\":", "\": "), ",\"", ", \""),
-	)
-	if err != nil {
-		return err
-	}
-
-	_, err = io.WriteString(h.destination, out.String()+"\n")
+	_, err := out.WriteString(who + ": ")
 	return err
 }
 
-func suppressDefaults(groups []string, a slog.Attr) slog.Attr {
-	if a.Key == slog.TimeKey ||
-		a.Key == slog.LevelKey ||
-		a.Key == slog.MessageKey {
-		return slog.Attr{}
+func writeMessage(out io.StringWriter, h *Handler, rec slog.Record) error {
+	msgAttr := slog.Attr{
+		Key:   slog.MessageKey,
+		Value: slog.StringValue(rec.Message),
 	}
-	return a
+	msgAttr = replaceAttr(h)([]string{}, msgAttr)
+	if msgAttr.Equal(slog.Attr{}) {
+		return nil
+	}
+	_, err := out.WriteString(msgAttr.Value.String())
+	return err
+}
+
+func writeAttribute(out *jsoniter.Stream, h *Handler, groups []string, attr slog.Attr) {
+	attr.Value = attr.Value.Resolve()
+	switch attr.Value.Kind() {
+	case slog.KindString:
+		out.WriteObjectField(attr.Key)
+		out.WriteRaw(" ")
+		out.WriteString(attr.Value.String())
+	case slog.KindInt64:
+		out.WriteObjectField(attr.Key)
+		out.WriteRaw(" ")
+		out.WriteInt64(attr.Value.Int64())
+	case slog.KindUint64:
+		out.WriteObjectField(attr.Key)
+		out.WriteRaw(" ")
+		out.WriteUint64(attr.Value.Uint64())
+	case slog.KindFloat64:
+		out.WriteObjectField(attr.Key)
+		out.WriteRaw(" ")
+		out.WriteFloat64(attr.Value.Float64())
+	case slog.KindBool:
+		out.WriteObjectField(attr.Key)
+		out.WriteRaw(" ")
+		out.WriteBool(attr.Value.Bool())
+	case slog.KindDuration:
+		out.WriteObjectField(attr.Key)
+		out.WriteRaw(" ")
+		out.WriteString(attr.Value.Duration().String())
+	case slog.KindTime:
+		out.WriteObjectField(attr.Key)
+		out.WriteRaw(" ")
+		out.WriteString(attr.Value.Time().String())
+	case slog.KindAny:
+		out.WriteObjectField(attr.Key)
+		out.WriteRaw(" ")
+		out.WriteVal(attr.Value.Any())
+	case slog.KindGroup:
+		if attr.Key != "" {
+			out.WriteObjectField(attr.Key)
+			out.WriteRaw(" ")
+			out.WriteObjectStart()
+			groups = append(groups, attr.Key)
+		}
+		needComma := false
+		for _, at := range attr.Value.Group() {
+			at = replaceAttr(h)(groups, at)
+			if at.Equal(slog.Attr{}) {
+				continue
+			}
+			if needComma {
+				out.WriteMore()
+				out.WriteRaw(" ")
+			}
+			writeAttribute(out, h, groups, at)
+			needComma = true
+		}
+		if attr.Key != "" {
+			out.WriteObjectEnd()
+		}
+	}
+}
+
+func writeParentGroupsAndAttributes(out *jsoniter.Stream, h *Handler, hasChildren bool) (
+	openGroups uint, needComma bool,
+) {
+	if h.previousHandler == nil {
+		// If we got to the base case and there are no attributes, then
+		// exit without writing an empty set of braces.
+		if !hasChildren {
+			return 0, false
+		}
+		out.WriteRaw(" ")
+		out.WriteObjectStart()
+		return 1, false
+	}
+
+	openGroups, needComma = writeParentGroupsAndAttributes(out, h.previousHandler, hasChildren || len(h.attributes) > 0)
+
+	if h.group != "" {
+		// Open a group
+		if needComma {
+			out.WriteMore()
+			out.WriteRaw(" ")
+		}
+		out.WriteObjectField(h.group)
+		out.WriteObjectStart()
+		return openGroups + 1, false
+	}
+	for _, attr := range h.attributes {
+		attr = replaceAttr(h)(h.groups(), attr)
+		if attr.Equal(slog.Attr{}) {
+			continue
+		}
+		if needComma {
+			out.WriteMore()
+			out.WriteRaw(" ")
+		}
+		writeAttribute(out, h, h.groups(), attr)
+		needComma = true
+	}
+	return openGroups, needComma
+}
+
+func writeAttributes(out *jsoniter.Stream, h *Handler, rec slog.Record) {
+	if rec.NumAttrs() == 0 {
+		for h.previousHandler != nil && h.group != "" {
+			// We're in a group, but we have no attributes. Omit this group.
+			h = h.previousHandler
+		}
+	}
+	// Go to the head of the list and start writing groups and attributes.
+	openGroups, needComma := writeParentGroupsAndAttributes(out, h, rec.NumAttrs() > 0)
+
+	// Then write the attributes in rec.Attrs.
+	rec.Attrs(func(a slog.Attr) bool {
+		a = replaceAttr(h)(h.groups(), a)
+		if a.Equal(slog.Attr{}) {
+			return true
+		}
+		if needComma {
+			out.WriteMore()
+			out.WriteRaw(" ")
+		}
+		writeAttribute(out, h, h.groups(), a)
+		needComma = true
+		return true
+	})
+	// Finally, close any open groups.
+	for range openGroups {
+		out.WriteObjectEnd()
+	}
+}
+
+// Handle implements [slog.Handler.Handle].
+func (h *Handler) Handle(_ context.Context, record slog.Record) error {
+	out := strings.Builder{}
+
+	err := writeTimestamp(&out, h, record)
+	if err != nil {
+		return err
+	}
+
+	err = writePid(&out, h)
+	if err != nil {
+		return err
+	}
+
+	err = writeLevel(&out, h, record)
+	if err != nil {
+		return err
+	}
+
+	err = writeCaller(&out, h, record)
+	if err != nil {
+		return err
+	}
+
+	err = writeMessage(&out, h, record)
+	if err != nil {
+		return err
+	}
+
+	jout := jsoniter.NewStream(jsoniter.Config{}.Froze(), &out, 50)
+	writeAttributes(jout, h, record)
+	if jout.Error != nil {
+		return jout.Error
+	}
+	jout.Flush()
+
+	_, err = io.WriteString(destination(h), out.String()+"\n")
+	return err
 }

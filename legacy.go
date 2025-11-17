@@ -8,8 +8,6 @@ import (
 	"runtime"
 	"strings"
 	"time"
-
-	jsoniter "github.com/json-iterator/go"
 )
 
 // Formats for use with [HandlerOptions.TimestampFormat].
@@ -133,14 +131,13 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 	}
 }
 
-func writeTimestamp(out io.StringWriter, h *Handler, rec slog.Record) error {
+func writeTimestamp(out *jsonStream, h *Handler, rec slog.Record) {
 	if rec.Time.IsZero() {
-		return nil
+		return
 	}
-	timeAttr := slog.Time(slog.TimeKey, rec.Time)
-	timeAttr = replaceAttr(h)([]string{}, timeAttr)
+	timeAttr := replaceAttr(h)([]string{}, slog.Time(slog.TimeKey, rec.Time))
 	if timeAttr.Equal(slog.Attr{}) {
-		return nil
+		return
 	}
 	var timestamp string
 	if timeAttr.Value.Kind() == slog.KindTime {
@@ -148,39 +145,30 @@ func writeTimestamp(out io.StringWriter, h *Handler, rec slog.Record) error {
 	} else {
 		timestamp = timeAttr.Value.String()
 	}
-	_, err := out.WriteString(timestamp + " ")
-	return err
+	out.WriteRaw(timestamp + " ")
 }
 
-func writePid(out io.StringWriter, h *Handler) error {
-	pidAttr := slog.Attr{
-		Key:   PidKey,
-		Value: slog.IntValue(os.Getpid()),
-	}
+func writePid(out *jsonStream, h *Handler, _ slog.Record) {
+	pidAttr := slog.Int(PidKey, os.Getpid())
 	pidAttr = replaceAttr(h)([]string{}, pidAttr)
 	if pidAttr.Equal(slog.Attr{}) {
-		return nil
+		return
 	}
-	_, err := out.WriteString("[" + pidAttr.Value.String() + "] ")
-	return err
+	out.WriteRaw("[" + pidAttr.Value.String() + "] ")
 }
 
-func writeLevel(out io.StringWriter, h *Handler, rec slog.Record) error {
-	levelAttr := slog.Attr{
-		Key:   slog.LevelKey,
-		Value: slog.AnyValue(rec.Level),
-	}
+func writeLevel(out *jsonStream, h *Handler, rec slog.Record) {
+	levelAttr := slog.Any(slog.LevelKey, rec.Level)
 	levelAttr = replaceAttr(h)([]string{}, levelAttr)
 	if levelAttr.Equal(slog.Attr{}) {
-		return nil
+		return
 	}
-	_, err := out.WriteString("<" + levelAttr.Value.String() + "> ")
-	return err
+	out.WriteRaw("<" + levelAttr.Value.String() + "> ")
 }
 
-func writeCaller(out io.StringWriter, h *Handler, rec slog.Record) error {
+func writeCaller(out *jsonStream, h *Handler, rec slog.Record) {
 	if rec.PC == 0 {
-		return nil
+		return
 	}
 
 	frames := runtime.CallersFrames([]uintptr{rec.PC})
@@ -192,126 +180,70 @@ func writeCaller(out io.StringWriter, h *Handler, rec slog.Record) error {
 			who = who[lastDot+1:]
 		}
 	}
-	_, err := out.WriteString(who + ": ")
-	return err
+	out.WriteRaw(who + ": ")
 }
 
-func writeMessage(out io.StringWriter, h *Handler, rec slog.Record) error {
-	msgAttr := slog.Attr{
-		Key:   slog.MessageKey,
-		Value: slog.StringValue(rec.Message),
-	}
+func writeMessage(out *jsonStream, h *Handler, rec slog.Record) {
+	msgAttr := slog.String(slog.MessageKey, rec.Message)
 	msgAttr = replaceAttr(h)([]string{}, msgAttr)
 	if msgAttr.Equal(slog.Attr{}) {
-		return nil
+		return
 	}
-	_, err := out.WriteString(msgAttr.Value.String())
-	return err
+	out.WriteRaw(msgAttr.Value.String())
 }
 
-func writeAttribute(out *jsoniter.Stream, h *Handler, groups []string, attr slog.Attr) {
+func writeAttribute(out *jsonStream, h *Handler, groups []string, attr slog.Attr) {
 	attr.Value = attr.Value.Resolve()
 	switch attr.Value.Kind() {
-	case slog.KindString:
-		out.WriteObjectField(attr.Key)
-		out.WriteRaw(" ")
-		out.WriteString(attr.Value.String())
-	case slog.KindInt64:
-		out.WriteObjectField(attr.Key)
-		out.WriteRaw(" ")
-		out.WriteInt64(attr.Value.Int64())
-	case slog.KindUint64:
-		out.WriteObjectField(attr.Key)
-		out.WriteRaw(" ")
-		out.WriteUint64(attr.Value.Uint64())
-	case slog.KindFloat64:
-		out.WriteObjectField(attr.Key)
-		out.WriteRaw(" ")
-		out.WriteFloat64(attr.Value.Float64())
-	case slog.KindBool:
-		out.WriteObjectField(attr.Key)
-		out.WriteRaw(" ")
-		out.WriteBool(attr.Value.Bool())
-	case slog.KindDuration:
-		out.WriteObjectField(attr.Key)
-		out.WriteRaw(" ")
-		out.WriteString(attr.Value.Duration().String())
-	case slog.KindTime:
-		out.WriteObjectField(attr.Key)
-		out.WriteRaw(" ")
-		out.WriteString(attr.Value.Time().String())
-	case slog.KindAny:
-		out.WriteObjectField(attr.Key)
-		out.WriteRaw(" ")
-		out.WriteVal(attr.Value.Any())
 	case slog.KindGroup:
-		if attr.Key != "" {
-			out.WriteObjectField(attr.Key)
-			out.WriteRaw(" ")
-			out.WriteObjectStart()
-			groups = append(groups, attr.Key)
+		writeGroup(out, h, groups, attr)
+	default:
+		write, ok := writeByKind[attr.Value.Kind()]
+		if !ok {
+			panic("No writer found for value")
 		}
-		needComma := false
-		for _, at := range attr.Value.Group() {
-			at = replaceAttr(h)(groups, at)
-			if at.Equal(slog.Attr{}) {
-				continue
-			}
-			if needComma {
-				out.WriteMore()
-				out.WriteRaw(" ")
-			}
-			writeAttribute(out, h, groups, at)
-			needComma = true
-		}
-		if attr.Key != "" {
-			out.WriteObjectEnd()
-		}
+		write(out, attr)
 	}
 }
 
-func writeParentGroupsAndAttributes(out *jsoniter.Stream, h *Handler, hasChildren bool) (
-	openGroups uint, needComma bool,
-) {
+// writeParentGroupAndAttributes writes the groups and attributes stored in the
+// handler h and any of its parent handlers. Returns the number of groups that
+// are currently open.
+func (h *Handler) writeParentGroupsAndAttributes(out *jsonStream, hasChildren bool) uint {
 	if h.previousHandler == nil {
 		// If we got to the base case and there are no attributes, then
 		// exit without writing an empty set of braces.
 		if !hasChildren {
-			return 0, false
+			return 0
 		}
 		out.WriteRaw(" ")
 		out.WriteObjectStart()
-		return 1, false
+		return 1
 	}
 
-	openGroups, needComma = writeParentGroupsAndAttributes(out, h.previousHandler, hasChildren || len(h.attributes) > 0)
+	openGroups := h.previousHandler.writeParentGroupsAndAttributes(out, hasChildren || len(h.attributes) > 0)
 
 	if h.group != "" {
 		// Open a group
-		if needComma {
-			out.WriteMore()
-			out.WriteRaw(" ")
-		}
 		out.WriteObjectField(h.group)
 		out.WriteObjectStart()
-		return openGroups + 1, false
+		return openGroups + 1
 	}
 	for _, attr := range h.attributes {
-		attr = replaceAttr(h)(h.groups(), attr)
-		if attr.Equal(slog.Attr{}) {
-			continue
-		}
-		if needComma {
-			out.WriteMore()
-			out.WriteRaw(" ")
-		}
-		writeAttribute(out, h, h.groups(), attr)
-		needComma = true
+		_ = writeNextAttribute(attr, out, h, h.groups())
 	}
-	return openGroups, needComma
+	return openGroups
 }
 
-func writeAttributes(out *jsoniter.Stream, h *Handler, rec slog.Record) {
+func writeNextAttribute(a slog.Attr, out *jsonStream, h *Handler, groups []string) bool {
+	a = replaceAttr(h)(groups, a)
+	if !a.Equal(slog.Attr{}) {
+		writeAttribute(out, h, groups, a)
+	}
+	return true
+}
+
+func writeAttributes(out *jsonStream, h *Handler, rec slog.Record) {
 	if rec.NumAttrs() == 0 {
 		for h.previousHandler != nil && h.group != "" {
 			// We're in a group, but we have no attributes. Omit this group.
@@ -319,21 +251,11 @@ func writeAttributes(out *jsoniter.Stream, h *Handler, rec slog.Record) {
 		}
 	}
 	// Go to the head of the list and start writing groups and attributes.
-	openGroups, needComma := writeParentGroupsAndAttributes(out, h, rec.NumAttrs() > 0)
+	openGroups := h.writeParentGroupsAndAttributes(out, rec.NumAttrs() > 0)
 
 	// Then write the attributes in rec.Attrs.
 	rec.Attrs(func(a slog.Attr) bool {
-		a = replaceAttr(h)(h.groups(), a)
-		if a.Equal(slog.Attr{}) {
-			return true
-		}
-		if needComma {
-			out.WriteMore()
-			out.WriteRaw(" ")
-		}
-		writeAttribute(out, h, h.groups(), a)
-		needComma = true
-		return true
+		return writeNextAttribute(a, out, h, h.groups())
 	})
 	// Finally, close any open groups.
 	for range openGroups {
@@ -343,40 +265,23 @@ func writeAttributes(out *jsoniter.Stream, h *Handler, rec slog.Record) {
 
 // Handle implements [slog.Handler.Handle].
 func (h *Handler) Handle(_ context.Context, record slog.Record) error {
-	out := strings.Builder{}
+	out := newJSONStream()
 
-	err := writeTimestamp(&out, h, record)
-	if err != nil {
-		return err
+	for _, writer := range []func(*jsonStream, *Handler, slog.Record){
+		writeTimestamp,
+		writePid,
+		writeLevel,
+		writeCaller,
+		writeMessage,
+		writeAttributes,
+	} {
+		writer(out, h, record)
+		if out.Error() != nil {
+			return out.Error()
+		}
 	}
+	out.WriteRaw("\n")
 
-	err = writePid(&out, h)
-	if err != nil {
-		return err
-	}
-
-	err = writeLevel(&out, h, record)
-	if err != nil {
-		return err
-	}
-
-	err = writeCaller(&out, h, record)
-	if err != nil {
-		return err
-	}
-
-	err = writeMessage(&out, h, record)
-	if err != nil {
-		return err
-	}
-
-	jout := jsoniter.NewStream(jsoniter.Config{}.Froze(), &out, 50)
-	writeAttributes(jout, h, record)
-	if jout.Error != nil {
-		return jout.Error
-	}
-	jout.Flush()
-
-	_, err = io.WriteString(destination(h), out.String()+"\n")
+	_, err := destination(h).Write(out.Buffer())
 	return err
 }

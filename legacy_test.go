@@ -399,7 +399,7 @@ func TestNumericSeverity(t *testing.T) {
 	))
 }
 
-func TestLegacy2(t *testing.T) {
+func TestLegacy(t *testing.T) {
 	t.Parallel()
 
 	formats := map[string]string{

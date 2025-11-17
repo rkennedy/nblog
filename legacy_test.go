@@ -2,10 +2,13 @@ package nblog_test
 
 //revive:disable:add-constant,function-length
 import (
+	"bytes"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
+	"testing/slogtest"
 	"time"
 
 	"github.com/MakeNowJust/heredoc/v2"
@@ -45,7 +48,7 @@ func TestAtomicOutput(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &MockWriter{}
-	h := nblog.NewHandler(output)
+	h := nblog.New(output, nil)
 	logger := slog.New(h)
 
 	logger.Info("a message", slog.String("attr", "value"))
@@ -69,7 +72,9 @@ func TestBasicLogFormat(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &strings.Builder{}
-	h := nblog.NewHandler(output, nblog.Level(slog.LevelDebug))
+	h := nblog.New(output, &nblog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})
 	logger := slog.New(h)
 
 	logger.Debug("a message")
@@ -89,33 +94,6 @@ func TestBasicLogFormat(t *testing.T) {
 	))
 }
 
-func TestAttributes(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output))
-
-	logger.Info("a message", "some attribute", "some value")
-
-	attrs := strings.SplitN(output.Lines[0], "a message", 2)[1]
-	g.Expect(attrs).To(Equal(` {"some attribute": "some value"}`))
-}
-
-func TestAttributeGroups(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output))
-
-	logger.Info("a message", "some attribute", "some value",
-		slog.Group("a group", slog.Int("an int", 5), slog.Bool("a bool", true)))
-
-	attrs := strings.SplitN(output.Lines[0], "a message", 2)[1]
-	g.Expect(attrs).To(Equal(` {"some attribute": "some value", "a group": {"an int": 5, "a bool": true}}`))
-}
-
 func TestAttributeTypes(t *testing.T) {
 	t.Parallel()
 
@@ -130,8 +108,9 @@ func TestAttributeTypes(t *testing.T) {
 		{slog.Int("int", 234), `"int": 234`},
 		{slog.Int64("int64", -5000000000), `"int64": -5000000000`},
 		{slog.String("string", "some value"), `"string": "some value"`},
-		{slog.Time("time", time.Date(2010, time.June, 4, 10, 34, 23, 14983, time.UTC)),
-			`"time": "2010-06-04 10:34:23.000014983 +0000 UTC"`},
+		// The label "time" is reserved; it matches slog.TimeKey.
+		{slog.Time("Time", time.Date(2010, time.June, 4, 10, 34, 23, 14983, time.UTC)),
+			`"Time": "2010-06-04 10:34:23.000014983 +0000 UTC"`},
 		{slog.Uint64("uint64", 6000000000), `"uint64": 6000000000`},
 	}
 
@@ -142,7 +121,8 @@ func TestAttributeTypes(t *testing.T) {
 			g := NewWithT(t)
 
 			output := &LineBuffer{}
-			logger := slog.New(nblog.NewHandler(output))
+			h := nblog.New(output, nil)
+			logger := slog.New(h)
 
 			logger.Info("A", pair.Attr)
 
@@ -156,7 +136,10 @@ func TestTimestampFormat(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output, nblog.TimestampFormat(nblog.TimeOnlyFormat)))
+	h := nblog.New(output, &nblog.HandlerOptions{
+		TimestampFormat: nblog.TimeOnlyFormat,
+	})
+	logger := slog.New(h)
 
 	logger.Info("a message")
 
@@ -197,7 +180,10 @@ func TestConstantLevelFiltering(t *testing.T) {
 			t.Parallel()
 			g := NewWithT(t)
 			output := &LineBuffer{}
-			logger := slog.New(nblog.NewHandler(output, nblog.Level(lev.Level)))
+			h := nblog.New(output, &nblog.HandlerOptions{
+				Level: lev.Level,
+			})
+			logger := slog.New(h)
 
 			logger.Debug("one")
 			logger.Info("two")
@@ -215,7 +201,10 @@ func TestChangedLevelFiltering(t *testing.T) {
 
 	output := &LineBuffer{}
 	var level slog.LevelVar
-	logger := slog.New(nblog.NewHandler(output, nblog.Level(&level)))
+	h := nblog.New(output, &nblog.HandlerOptions{
+		Level: &level,
+	})
+	logger := slog.New(h)
 
 	logger.Debug("hidden", slog.Int("line", 1))
 	logger.Info("shown", slog.Int("line", 2))
@@ -238,7 +227,10 @@ func TestOmitCallerPackage(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(false)))
+	h := nblog.New(output, &nblog.HandlerOptions{
+		UseFullCallerName: false,
+	})
+	logger := slog.New(h)
 
 	logger.Info("message")
 
@@ -253,85 +245,16 @@ func TestIncludeCallerPackage(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(true)))
+	h := nblog.New(output, &nblog.HandlerOptions{
+		UseFullCallerName: true,
+	})
+	logger := slog.New(h)
 
 	logger.Info("message")
 
 	g.Expect(output.Lines[0]).To(And(
 		ContainSubstring(ThisPackage),
 		ContainSubstring(".TestIncludeCallerPackage:"),
-	))
-}
-
-func TestOverrideCallerNameImmediate(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(true)))
-
-	logger.Info("message", slog.String("who", "override"))
-
-	g.Expect(output.Lines[0]).To(And(
-		Not(ContainSubstring(ThisPackage)),
-		Not(ContainSubstring(".TestOverrideCallerNameImmediate:")),
-		ContainSubstring(" override: "),
-		Not(ContainSubstring(`"who": "override"`)),
-	))
-}
-
-func TestOverrideCallerNameWith(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output, nblog.UseFullCallerName(true)))
-
-	logger = logger.With("who", "override")
-	logger.Info("message")
-
-	g.Expect(output.Lines[0]).To(And(
-		Not(ContainSubstring(ThisPackage)),
-		Not(ContainSubstring(".TestOverrideCallerNameWith:")),
-		ContainSubstring(" override: "),
-		Not(ContainSubstring(`"who": "override"`)),
-	))
-}
-
-// TestWithGroup checks that multiple nested levels of [slog.Logger.WithGroup]
-// appear correctly in the output.
-func TestWithGroup(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output))
-
-	logger = logger.With("c", 3).WithGroup("g").With("a", 1).WithGroup("h")
-	logger.Info("message", slog.Int("b", 1))
-
-	g.Expect(output.Lines[0]).To(HaveSuffix(`: message {"c": 3, "g": {"a": 1, "h": {"b": 1}}}`))
-}
-
-// TestEmptyGroups checks that groups added by WithGroup will appear in the
-// output even when they end up containing no attributes, but that groups added
-// with [slog.Group] will be omitted when the contain no attributes. This is
-// for consistency with [slog.JSONHandler].
-func TestEmptyGroups(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output))
-
-	logger.With(slog.Int("a", 1)).WithGroup("u").Info("message")
-	logger.With(slog.Int("a", 1), slog.Group("r")).Info("message")
-	logger.With(slog.Int("a", 1)).Info("message", slog.Group("s"))
-
-	g.Expect(output.Lines).To(HaveExactElements(
-		HaveSuffix(`: message {"a": 1, "u": {}}`),
-		HaveSuffix(`: message {"a": 1}`),
-		HaveSuffix(`: message {"a": 1}`),
 	))
 }
 
@@ -349,7 +272,10 @@ func TestRenameAttr(t *testing.T) {
 		return attr
 	}
 	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output, nblog.ReplaceAttrs(repl)))
+	h := nblog.New(output, &nblog.HandlerOptions{
+		ReplaceAttr: repl,
+	})
+	logger := slog.New(h)
 
 	logger.Info("message", slog.Int("a", 5), slog.Bool("b", true))
 	logger.With(slog.Int("a", 5), slog.Bool("b", true)).Info("message")
@@ -370,7 +296,10 @@ func TestRemoveAttr(t *testing.T) {
 		return attr
 	}
 	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output, nblog.ReplaceAttrs(repl)))
+	h := nblog.New(output, &nblog.HandlerOptions{
+		ReplaceAttr: repl,
+	})
+	logger := slog.New(h)
 
 	logger.Info("message", slog.Int("a", 5), slog.Bool("b", true))
 	logger.With(slog.Int("a", 5), slog.Bool("b", true)).Info("message")
@@ -401,19 +330,20 @@ func TestReplaceTimeField(t *testing.T) {
 		{"withEmptyKey", slog.Any("", nil), "["},
 	}
 	for _, repl := range replacements {
-		repl := repl
 		t.Run(repl.Name, func(t *testing.T) {
 			t.Parallel()
 			g := NewWithT(t)
 
 			output := &LineBuffer{}
-			logger := slog.New(nblog.NewHandler(output,
-				nblog.ReplaceAttrs(func(groups []string, attr slog.Attr) slog.Attr {
-					if len(groups) == 0 && attr.Key == nblog.TimeKey {
+			h := nblog.New(output, &nblog.HandlerOptions{
+				ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
+					if len(groups) == 0 && attr.Key == slog.TimeKey {
 						return repl.Replacement
 					}
 					return attr
-				})))
+				},
+			})
+			logger := slog.New(h)
 
 			logger.Info("message")
 
@@ -432,7 +362,10 @@ func TestReplaceGroupNames(t *testing.T) {
 		return attr
 	}
 	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output, nblog.ReplaceAttrs(repl)))
+	h := nblog.New(output, &nblog.HandlerOptions{
+		ReplaceAttr: repl,
+	})
+	logger := slog.New(h)
 
 	logger.Info("message", slog.Group("a", slog.Int("b", 1), slog.Group("c", slog.Bool("d", false))))
 
@@ -442,40 +375,16 @@ func TestReplaceGroupNames(t *testing.T) {
 	))
 }
 
-func TestChainingReplacements(t *testing.T) {
-	t.Parallel()
-	g := NewWithT(t)
-
-	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output,
-		nblog.ReplaceAttrs(func(_ /* g */ []string, attr slog.Attr) slog.Attr {
-			if attr.Key == "a" {
-				attr.Value = slog.Int64Value(3 + attr.Value.Int64())
-			}
-			return attr
-		}),
-		nblog.ReplaceAttrs(func(_ /* g */ []string, attr slog.Attr) slog.Attr {
-			if attr.Key == "a" || attr.Key == "b" {
-				attr.Value = slog.Int64Value(2 * attr.Value.Int64())
-			}
-			return attr
-		}),
-	))
-
-	logger.Info("message", "a", 1, "b", 2)
-
-	g.Expect(output.Lines[0]).To(HaveSuffix(` message {"a": 8, "b": 4}`))
-}
-
 func TestNumericSeverity(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
 
 	output := &LineBuffer{}
-	logger := slog.New(nblog.NewHandler(output,
-		nblog.Level(slog.LevelDebug),
-		nblog.NumericSeverity(),
-	))
+	h := nblog.New(output, &nblog.HandlerOptions{
+		Level:           slog.LevelDebug,
+		NumericSeverity: true,
+	})
+	logger := slog.New(h)
 
 	logger.Debug("debug")
 	logger.Info("info")
@@ -490,13 +399,107 @@ func TestNumericSeverity(t *testing.T) {
 	))
 }
 
+//revive:disable-next-line:cognitive-complexity Parsing logs is complicated.
+func TestLegacy(t *testing.T) {
+	t.Parallel()
+
+	formats := map[string]string{
+		"full-timestamp": nblog.FullDateFormat,
+		"time-only":      nblog.TimeOnlyFormat,
+	}
+
+	for label, format := range formats {
+		t.Run(label, func(t *testing.T) {
+			t.Parallel()
+			var buf bytes.Buffer
+			newHandler := func(*testing.T) slog.Handler {
+				buf.Reset()
+				return nblog.New(&buf, &nblog.HandlerOptions{
+					TimestampFormat: format,
+				})
+			}
+
+			parse := func(t *testing.T) map[string]any {
+				// 2024-11-22 15:00:07.398 [pid] <INFO> fn: msg {"G": {"a": "v1", "b": }}
+				line := buf.String()
+				t.Logf("Parsing log message %#v", line)
+				if line[len(line)-1] == '\n' {
+					line = line[:len(line)-1]
+				}
+
+				result := make(map[string]any)
+
+				pidIndex := strings.Index(line, " [")
+				if pidIndex >= 0 {
+					timestamp := line[0:pidIndex]
+					logtime, err := time.Parse(format, timestamp)
+					if err != nil {
+						t.Logf("Could not parse date from message: %v", err)
+						// Assume there is no date.
+					} else {
+						result[slog.TimeKey] = logtime
+						line = line[pidIndex+1:]
+					}
+				}
+
+				dataIndex := strings.Index(line, " {")
+				if dataIndex > 0 {
+					// Read additional data
+					err := json.Unmarshal([]byte(line[dataIndex+1:]), &result)
+					if err != nil {
+						t.Errorf("Could not parse data component: %s", err.Error())
+					}
+					line = line[:dataIndex]
+				}
+
+				// message never contains a space during testing.
+				components := strings.Split(line, " ")
+				switch len(components) {
+				case 3:
+					// [pid] <LEVEL> msg
+				case 4:
+					// [pid] <LEVEL> fn: msg
+				default:
+					t.Fatalf("Expected 4 components, got %d", len(components))
+				}
+
+				// Read process ID
+				pid := components[0][1 : len(components[1])-1]
+				result[nblog.PidKey] = pid
+
+				// Read severity
+				severity := components[1][1 : len(components[1])-1]
+				result[slog.LevelKey] = severity
+
+				if len(components) == 4 {
+					// Read caller
+					caller := components[2][0 : len(components[2])-1]
+					result["who"] = caller
+
+					// Read message
+					result[slog.MessageKey] = components[3]
+				} else {
+					// Read message
+					result[slog.MessageKey] = components[2]
+				}
+
+				t.Logf("Parsed results: %#v", result)
+
+				return result
+			}
+
+			slogtest.Run(t, newHandler, parse)
+		})
+	}
+}
+
 // UniformOutput is a callback function for use with [ReplaceAttrs]. It
 // replaces the time and process-ID pseudo-attributes with values that will be
 // the same on every run so that tests can check for predictable output.
 func UniformOutput(groups []string, attr slog.Attr) slog.Attr {
 	if len(groups) == 0 {
 		switch attr.Key {
-		case nblog.TimeKey:
+		case slog.TimeKey:
 			return slog.Time(attr.Key, time.Date(2006, time.January, 2, 15, 4, 5, 0, time.UTC))
 		case nblog.PidKey:
 			return slog.Int(attr.Key, 42)

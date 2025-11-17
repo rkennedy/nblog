@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 readonly script_dir
 readonly cache_volume=go-cache-nblog
-readonly golang=docker.io/library/golang:1.22.1-alpine
+readonly golang=docker.io/library/golang:1.25.4-alpine
 
 readonly cache_path=/go-cache
 

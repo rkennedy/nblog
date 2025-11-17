@@ -16,24 +16,20 @@ const (
 	TimeOnlyFormat = time.TimeOnly + ".000"
 )
 
-// When formatting a message, the handler calls any [ReplaceAttrFunc] callbacks
-// on any attributes associated with the message. It will synthesize attributes
-// representing the timestamp, process ID, level, and message, giving the
-// program an opportunity to modify, replace, or remove any of them, just as
-// for any other attributes. Such synthetic attributes are identified with
-// these labels, which should be unique enough not to collide with any
-// attribute keys in the program.
+// When formatting a message, the handler calls any [ReplaceAttrFunc] callbacks on any attributes associated with the
+// message. It will synthesize attributes representing the timestamp, process ID, level, and message, giving the program
+// an opportunity to modify, replace, or remove any of them, just as for any other attributes. Such synthetic attributes
+// are identified with these labels, which should be unique enough not to collide with any attribute keys in the
+// program.
 //
-// If the replacement callback returns a [time.Time] value for the “time”
-// attribute, then it will be formatted with the configured [TimestampFormat]
-// option. Othe types for “time,” as well as other synthetic attributes, are
-// recorded in the log with [slog.Value.String].
+// If the replacement callback returns a [time.Time] value for the “time” attribute, then it will be formatted with the
+// configured [TimestampFormat] option. Othe types for “time,” as well as other synthetic attributes, are recorded in
+// the log with [slog.Value.String].
 const (
 	PidKey = "pid-47482072-7496-40a0-a048-ccfdba4e564e" // process ID
 )
 
-// Handler is a [slog.Handler] that writes log messages in the format of
-// NetBackup legacy logs.
+// Handler is a [slog.Handler] that writes log messages in the format of NetBackup legacy logs.
 type Handler struct {
 	destination io.Writer
 
@@ -49,29 +45,24 @@ type Handler struct {
 
 var _ slog.Handler = &Handler{}
 
-// HandlerOptions describes the options available for nblog logger options. The
-// AddSource, Level, and ReplaceAttr fields are as for [slog.HandlerOptions].
+// HandlerOptions describes the options available for nblog logger options. The AddSource, Level, and ReplaceAttr fields
+// are as for [slog.HandlerOptions].
 type HandlerOptions struct {
 	AddSource   bool
 	Level       slog.Leveler
 	ReplaceAttr ReplaceAttrFunc
 
-	// TimestampFormat specifies the [time] format used for formatting
-	// timestamps (à la [time.Time.Format]) in the logger output. If left
-	// unset, the default used will be [FullDateFormat]. The classic
-	// NetBackup format is [TimeOnlyFormat]; use that if log rotation would
-	// make the repeated inclusion of the date redundant.
+	// TimestampFormat specifies the [time] format used for formatting timestamps (à la [time.Time.Format]) in the
+	// logger output. If left unset, the default used will be [FullDateFormat]. The classic NetBackup format is
+	// [TimeOnlyFormat]; use that if log rotation would make the repeated inclusion of the date redundant.
 	TimestampFormat string
 
-	// UseFullCallerName determines whether to include or omit the
-	// package-name portion of the caller in log messages. The default is
-	// to omit the package, so only the function name will appear.
+	// UseFullCallerName determines whether to include or omit the package-name portion of the caller in log messages.
+	// The default is to omit the package, so only the function name will appear.
 	UseFullCallerName bool
 
-	// NumericSeverity configures the handler to record
-	// the log level as a number instead of a text label.
-	// Numbers used correspond to NetBackup severity
-	// levels, not [slog] levels:
+	// NumericSeverity configures the handler to record the log level as a number instead of a text label. Numbers used
+	// correspond to NetBackup severity levels, not [slog] levels:
 	//
 	// - LevelDebug: 2
 	// - LevelInfo: 4
@@ -80,8 +71,7 @@ type HandlerOptions struct {
 	NumericSeverity bool
 }
 
-// New creates a new [Handler]. It receives a destination [io.Writer] and
-// options to configure it.
+// New creates a new [Handler]. It receives a destination [io.Writer] and options to configure it.
 func New(w io.Writer, opts *HandlerOptions) *Handler {
 	if opts == nil {
 		opts = &HandlerOptions{}
@@ -210,9 +200,8 @@ func writeAttribute(out *jsonStream, h *Handler, groups []string, attr slog.Attr
 	}
 }
 
-// writeParentGroupAndAttributes writes the groups and attributes stored in the
-// handler h and any of its parent handlers. Returns the number of groups that
-// are currently open.
+// writeParentGroupAndAttributes writes the groups and attributes stored in the handler h and any of its parent
+// handlers. Returns the number of groups that are currently open.
 //
 //revive:disable-next-line:function-length There's no good way to make this any shorter.
 func (h *Handler) writeParentGroupsAndAttributes( //revive:disable-line:flag-parameter
@@ -220,8 +209,7 @@ func (h *Handler) writeParentGroupsAndAttributes( //revive:disable-line:flag-par
 	hasChildren bool,
 ) uint {
 	if h.previousHandler == nil {
-		// If we got to the base case and there are no attributes, then
-		// exit without writing an empty set of braces.
+		// If we got to the base case and there are no attributes, then exit without writing an empty set of braces.
 		if !hasChildren {
 			return 0
 		}

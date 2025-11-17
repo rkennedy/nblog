@@ -399,6 +399,7 @@ func TestNumericSeverity(t *testing.T) {
 	))
 }
 
+//revive:disable-next-line:cognitive-complexity Parsing logs is complicated.
 func TestLegacy(t *testing.T) {
 	t.Parallel()
 

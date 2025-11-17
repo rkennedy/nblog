@@ -32,6 +32,8 @@ const (
 	PidKey = "pid-47482072-7496-40a0-a048-ccfdba4e564e" // process ID
 )
 
+// Handler is a [slog.Handler] that writes log messages in the format of
+// NetBackup legacy logs.
 type Handler struct {
 	destination io.Writer
 
@@ -44,6 +46,8 @@ type Handler struct {
 	group           string
 	attributes      []slog.Attr
 }
+
+var _ slog.Handler = &Handler{}
 
 // HandlerOptions describes the options available for nblog logger options. The
 // AddSource, Level, and ReplaceAttr fields are as for [slog.HandlerOptions].
@@ -209,7 +213,12 @@ func writeAttribute(out *jsonStream, h *Handler, groups []string, attr slog.Attr
 // writeParentGroupAndAttributes writes the groups and attributes stored in the
 // handler h and any of its parent handlers. Returns the number of groups that
 // are currently open.
-func (h *Handler) writeParentGroupsAndAttributes(out *jsonStream, hasChildren bool) uint {
+//
+//revive:disable-next-line:function-length There's no good way to make this any shorter.
+func (h *Handler) writeParentGroupsAndAttributes( //revive:disable-line:flag-parameter
+	out *jsonStream,
+	hasChildren bool,
+) uint {
 	if h.previousHandler == nil {
 		// If we got to the base case and there are no attributes, then
 		// exit without writing an empty set of braces.

@@ -18,7 +18,8 @@ func ExampleHandlerOptions_Level() {
 	logger := slog.New(handler)
 	logger.Info("info message")
 	logger.Warn("warning message")
-	// Output: 2006-01-02 15:04:05.000 [42] <WARN> ExampleHandlerOptions_Level: warning message
+	// Output:
+	// 2006-01-02 15:04:05.000 [42] <WARN> ExampleHandlerOptions_Level: warning message
 }
 
 func ExampleHandlerOptions_TimestampFormat() {
@@ -28,17 +29,21 @@ func ExampleHandlerOptions_TimestampFormat() {
 	})
 	logger := slog.New(handler)
 	logger.Info("info message")
-	// Output: Monday, 02-Jan-06 15:04:05 UTC [42] <INFO> ExampleHandlerOptions_TimestampFormat: info message
+	// Output:
+	// Monday, 02-Jan-06 15:04:05 UTC [42] <INFO> ExampleHandlerOptions_TimestampFormat: info message
 }
 
 func ExampleHandlerOptions_UseFullCallerName_true() {
 	handler := nblog.New(os.Stdout, &nblog.HandlerOptions{
 		UseFullCallerName: true,
+		TimestampFormat:   nblog.TimeOnlyFormat,
 		ReplaceAttr:       UniformOutput,
 	})
 	logger := slog.New(handler)
 	logger.Info("info")
-	// Output: 2006-01-02 15:04:05.000 [42] <INFO> github.com/rkennedy/nblog_test.ExampleHandlerOptions_UseFullCallerName_true: info
+
+	// Output:
+	// 15:04:05.000 [42] <INFO> github.com/rkennedy/nblog_test.ExampleHandlerOptions_UseFullCallerName_true: info
 }
 
 func ExampleHandlerOptions_UseFullCallerName_false() {
@@ -48,7 +53,8 @@ func ExampleHandlerOptions_UseFullCallerName_false() {
 	})
 	logger := slog.New(handler)
 	logger.Info("info message")
-	// Output: 2006-01-02 15:04:05.000 [42] <INFO> ExampleHandlerOptions_UseFullCallerName_false: info message
+	// Output:
+	// 2006-01-02 15:04:05.000 [42] <INFO> ExampleHandlerOptions_UseFullCallerName_false: info message
 }
 
 func ExampleTrace() {

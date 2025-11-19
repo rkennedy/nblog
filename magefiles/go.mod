@@ -1,18 +1,18 @@
 module github.com/rkennedy/nblog/magefiles
 
-go 1.24.0
+go 1.25
 
 require (
 	github.com/magefile/mage v1.15.0
 	github.com/mgechev/revive v1.13.0
-	github.com/rkennedy/magehelper v0.0.0-20240814151936-35a7f2a0f33a
+	github.com/rkennedy/magehelper v0.0.0-20251109231914-714aa1139178
 	golang.org/x/tools v0.39.0
 )
 
 require (
 	codeberg.org/chavacava/garif v0.2.0 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect
-	github.com/deckarep/golang-set/v2 v2.6.0 // indirect
+	github.com/deckarep/golang-set/v2 v2.8.0 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect
@@ -23,6 +23,7 @@ require (
 	golang.org/x/mod v0.30.0 // indirect
 	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/telemetry v0.0.0-20251111182119-bc8e575c7b54 // indirect
-	golang.org/x/text v0.30.0 // indirect
+	golang.org/x/telemetry v0.0.0-20251112162317-03ef243c208a // indirect
+	golang.org/x/text v0.31.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

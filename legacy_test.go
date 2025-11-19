@@ -23,8 +23,7 @@ const (
 	ThisPackage        = "github.com/rkennedy/nblog_test"
 )
 
-// MockWriter is a writer that discards its input and instead merely counts the
-// calls to its Write method.
+// MockWriter is a writer that discards its input and instead merely counts the calls to its Write method.
 type MockWriter struct {
 	WriteCallCount uint
 }
@@ -34,15 +33,13 @@ func (mw *MockWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// TestAtomicOutput checks how many times the log handler writes to its output
-// buffer for each log message. It should be _once_ to support writers that
-// perform logic between calls to Write. For example, natefinch/lumberjack
-// checks the future log size before each call to Write, which could result in
-// a log message being split acros multiple files. Besides, this is also the
-// documented behavior from [slog.TextHandler.Handle].
+// TestAtomicOutput checks how many times the log handler writes to its output buffer for each log message. It should be
+// _once_ to support writers that perform logic between calls to Write. For example, natefinch/lumberjack checks the
+// future log size before each call to Write, which could result in a log message being split acros multiple files.
+// Besides, this is also the documented behavior from [slog.TextHandler.Handle].
 //
-// Subsequent tests using the [LineBuffer] implementation of [io.Writer] rely
-// on this atomic behavior to inspect the output.
+// Subsequent tests using the [LineBuffer] implementation of [io.Writer] rely on this atomic behavior to inspect the
+// output.
 func TestAtomicOutput(t *testing.T) {
 	t.Parallel()
 	g := NewWithT(t)
@@ -455,10 +452,8 @@ func TestLegacy(t *testing.T) {
 				// message never contains a space during testing.
 				components := strings.Split(line, " ")
 				switch len(components) {
-				case 3:
-					// [pid] <LEVEL> msg
-				case 4:
-					// [pid] <LEVEL> fn: msg
+				case 3, // [pid] <LEVEL> msg
+					4: // [pid] <LEVEL> fn: msg
 				default:
 					t.Fatalf("Expected 4 components, got %d", len(components))
 				}
@@ -493,9 +488,8 @@ func TestLegacy(t *testing.T) {
 	}
 }
 
-// UniformOutput is a callback function for use with [ReplaceAttrs]. It
-// replaces the time and process-ID pseudo-attributes with values that will be
-// the same on every run so that tests can check for predictable output.
+// UniformOutput is a callback function for use with [ReplaceAttrs]. It replaces the time and process-ID
+// pseudo-attributes with values that will be the same on every run so that tests can check for predictable output.
 func UniformOutput(groups []string, attr slog.Attr) slog.Attr {
 	if len(groups) == 0 {
 		switch attr.Key {

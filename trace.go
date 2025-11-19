@@ -9,7 +9,7 @@ import (
 
 // TraceStopper is the interface returned by [Trace] to allow callers to stop the trace. Use it with defer. For example:
 //
-// defer nblog.Trace(logger).Stop()
+//	defer nblog.Trace(logger).Stop()
 type TraceStopper interface {
 	Stop()
 }
@@ -30,10 +30,9 @@ type nullStopper struct{}
 
 func (*nullStopper) Stop() {}
 
-// Trace marks the start of a function and returns a [TraceStopper] that can be
-// used to mark the end of the function. Trace logs the message “Entered” to
-// the logger. Afterward, [TraceStopper.Stop] logs the message “Exited” along
-// with a “duration” attribute to indicate how long the function ran.
+// Trace marks the start of a function and returns a [TraceStopper] that can be used to mark the end of the function.
+// Trace logs the message “Entered” to the logger. Afterward, [TraceStopper.Stop] logs the message “Exited” along with a
+// “duration” attribute to indicate how long the function ran.
 func Trace(logger *slog.Logger) TraceStopper {
 	if !logger.Enabled(context.Background(), slog.LevelDebug) {
 		return &nullStopper{}

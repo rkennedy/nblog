@@ -2,7 +2,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/rkennedy/nblog.svg)](https://pkg.go.dev/github.com/rkennedy/nblog)
 
-The _nblog_ package provides a handler for the _slo_ package that formats records in the style of NetBackup "legacy" logs:
+The _nblog_ package provides a handler for the _log/slog_ package that formats records in the style of NetBackup "legacy" logs:
 
     time [pid] <sev> caller: message
 
@@ -25,7 +25,7 @@ import (
 )
 
 func main() {
-	logger := slog.New(nblog.NewHandler(os.Stdout))
+	logger := slog.New(nblog.New(os.Stdout, nil))
 	logger.Info("message")
 }
 ```

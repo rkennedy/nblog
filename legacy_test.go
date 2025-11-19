@@ -452,10 +452,8 @@ func TestLegacy(t *testing.T) {
 				// message never contains a space during testing.
 				components := strings.Split(line, " ")
 				switch len(components) {
-				case 3:
-					// [pid] <LEVEL> msg
-				case 4:
-					// [pid] <LEVEL> fn: msg
+				case 3, // [pid] <LEVEL> msg
+					4: // [pid] <LEVEL> fn: msg
 				default:
 					t.Fatalf("Expected 4 components, got %d", len(components))
 				}

@@ -25,7 +25,7 @@ import (
 )
 
 func main() {
-	logger := slog.New(nblog.New(os.Stdout, nil))
+	logger := slog.New(nblog.New(os.Stdout))
 	logger.Info("message")
 }
 ```

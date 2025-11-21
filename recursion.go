@@ -12,7 +12,7 @@ func baseHandler(h *Handler) *Handler {
 	return h
 }
 
-func level(h *Handler) slog.Leveler {
+func getLevel(h *Handler) slog.Leveler {
 	return baseHandler(h).level
 }
 
@@ -20,16 +20,28 @@ func destination(h *Handler) io.Writer {
 	return baseHandler(h).destination
 }
 
-func replaceAttr(h *Handler) ReplaceAttrFunc {
-	return baseHandler(h).replaceAttr
+func identityAttribute(_ []string, a slog.Attr) slog.Attr {
+	return a
 }
 
-func timestampFormat(h *Handler) string {
+func getReplaceAttr(h *Handler) ReplaceAttrFunc {
+	result := baseHandler(h).replaceAttr
+	if result == nil {
+		return identityAttribute
+	}
+	return result
+}
+
+func getTimestampFormat(h *Handler) string {
 	return baseHandler(h).timestampFormat
 }
 
-func useFullCallerName(h *Handler) bool {
+func getUseFullCallerName(h *Handler) bool {
 	return baseHandler(h).useFullCallerName
+}
+
+func getNumericSeverity(h *Handler) bool {
+	return baseHandler(h).numericSeverity
 }
 
 func (h *Handler) groups() []string {

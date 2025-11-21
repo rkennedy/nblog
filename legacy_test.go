@@ -35,7 +35,7 @@ func (mw *MockWriter) Write(p []byte) (int, error) {
 
 // TestAtomicOutput checks how many times the log handler writes to its output buffer for each log message. It should be
 // _once_ to support writers that perform logic between calls to Write. For example, natefinch/lumberjack checks the
-// future log size before each call to Write, which could result in a log message being split acros multiple files.
+// future log size before each call to Write, which could result in a log message being split across multiple files.
 // Besides, this is also the documented behavior from [slog.TextHandler.Handle].
 //
 // Subsequent tests using the [LineBuffer] implementation of [io.Writer] rely on this atomic behavior to inspect the
@@ -45,7 +45,7 @@ func TestAtomicOutput(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &MockWriter{}
-	h := nblog.New(output, nil)
+	h := nblog.New(output)
 	logger := slog.New(h)
 
 	logger.Info("a message", slog.String("attr", "value"))
@@ -69,9 +69,9 @@ func TestBasicLogFormat(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &strings.Builder{}
-	h := nblog.New(output, &nblog.HandlerOptions{
-		Level: slog.LevelDebug,
-	})
+	h := nblog.New(output,
+		nblog.Level(slog.LevelDebug),
+	)
 	logger := slog.New(h)
 
 	logger.Debug("a message")
@@ -118,7 +118,7 @@ func TestAttributeTypes(t *testing.T) {
 			g := NewWithT(t)
 
 			output := &LineBuffer{}
-			h := nblog.New(output, nil)
+			h := nblog.New(output)
 			logger := slog.New(h)
 
 			logger.Info("A", pair.Attr)
@@ -133,9 +133,9 @@ func TestTimestampFormat(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &LineBuffer{}
-	h := nblog.New(output, &nblog.HandlerOptions{
-		TimestampFormat: nblog.TimeOnlyFormat,
-	})
+	h := nblog.New(output,
+		nblog.TimestampFormat(nblog.TimeOnlyFormat),
+	)
 	logger := slog.New(h)
 
 	logger.Info("a message")
@@ -177,9 +177,9 @@ func TestConstantLevelFiltering(t *testing.T) {
 			t.Parallel()
 			g := NewWithT(t)
 			output := &LineBuffer{}
-			h := nblog.New(output, &nblog.HandlerOptions{
-				Level: lev.Level,
-			})
+			h := nblog.New(output,
+				nblog.Level(lev.Level),
+			)
 			logger := slog.New(h)
 
 			logger.Debug("one")
@@ -198,9 +198,9 @@ func TestChangedLevelFiltering(t *testing.T) {
 
 	output := &LineBuffer{}
 	var level slog.LevelVar
-	h := nblog.New(output, &nblog.HandlerOptions{
-		Level: &level,
-	})
+	h := nblog.New(output,
+		nblog.Level(&level),
+	)
 	logger := slog.New(h)
 
 	logger.Debug("hidden", slog.Int("line", 1))
@@ -224,9 +224,9 @@ func TestOmitCallerPackage(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &LineBuffer{}
-	h := nblog.New(output, &nblog.HandlerOptions{
-		UseFullCallerName: false,
-	})
+	h := nblog.New(output,
+		nblog.UseFullCallerName(false),
+	)
 	logger := slog.New(h)
 
 	logger.Info("message")
@@ -242,9 +242,9 @@ func TestIncludeCallerPackage(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &LineBuffer{}
-	h := nblog.New(output, &nblog.HandlerOptions{
-		UseFullCallerName: true,
-	})
+	h := nblog.New(output,
+		nblog.UseFullCallerName(true),
+	)
 	logger := slog.New(h)
 
 	logger.Info("message")
@@ -269,9 +269,9 @@ func TestRenameAttr(t *testing.T) {
 		return attr
 	}
 	output := &LineBuffer{}
-	h := nblog.New(output, &nblog.HandlerOptions{
-		ReplaceAttr: repl,
-	})
+	h := nblog.New(output,
+		nblog.ReplaceAttr(repl),
+	)
 	logger := slog.New(h)
 
 	logger.Info("message", slog.Int("a", 5), slog.Bool("b", true))
@@ -293,9 +293,9 @@ func TestRemoveAttr(t *testing.T) {
 		return attr
 	}
 	output := &LineBuffer{}
-	h := nblog.New(output, &nblog.HandlerOptions{
-		ReplaceAttr: repl,
-	})
+	h := nblog.New(output,
+		nblog.ReplaceAttr(repl),
+	)
 	logger := slog.New(h)
 
 	logger.Info("message", slog.Int("a", 5), slog.Bool("b", true))
@@ -332,14 +332,14 @@ func TestReplaceTimeField(t *testing.T) {
 			g := NewWithT(t)
 
 			output := &LineBuffer{}
-			h := nblog.New(output, &nblog.HandlerOptions{
-				ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
+			h := nblog.New(output,
+				nblog.ReplaceAttr(func(groups []string, attr slog.Attr) slog.Attr {
 					if len(groups) == 0 && attr.Key == slog.TimeKey {
 						return repl.Replacement
 					}
 					return attr
-				},
-			})
+				}),
+			)
 			logger := slog.New(h)
 
 			logger.Info("message")
@@ -359,9 +359,9 @@ func TestReplaceGroupNames(t *testing.T) {
 		return attr
 	}
 	output := &LineBuffer{}
-	h := nblog.New(output, &nblog.HandlerOptions{
-		ReplaceAttr: repl,
-	})
+	h := nblog.New(output,
+		nblog.ReplaceAttr(repl),
+	)
 	logger := slog.New(h)
 
 	logger.Info("message", slog.Group("a", slog.Int("b", 1), slog.Group("c", slog.Bool("d", false))))
@@ -377,10 +377,10 @@ func TestNumericSeverity(t *testing.T) {
 	g := NewWithT(t)
 
 	output := &LineBuffer{}
-	h := nblog.New(output, &nblog.HandlerOptions{
-		Level:           slog.LevelDebug,
-		NumericSeverity: true,
-	})
+	h := nblog.New(output,
+		nblog.Level(slog.LevelDebug),
+		nblog.NumericSeverity(true),
+	)
 	logger := slog.New(h)
 
 	logger.Debug("debug")
@@ -411,13 +411,13 @@ func TestLegacy(t *testing.T) {
 			var buf bytes.Buffer
 			newHandler := func(*testing.T) slog.Handler {
 				buf.Reset()
-				return nblog.New(&buf, &nblog.HandlerOptions{
-					TimestampFormat: format,
-				})
+				return nblog.New(&buf,
+					nblog.TimestampFormat(format),
+				)
 			}
 
 			parse := func(t *testing.T) map[string]any {
-				// 2024-11-22 15:00:07.398 [pid] <INFO> fn: msg {"G": {"a": "v1", "b": }}
+				// 2024-11-22 15:00:07.398 [pid] <INFO> fn: msg {"G": {"a": "v1", "b": "v2"}}
 				line := buf.String()
 				t.Logf("Parsing log message %#v", line)
 				if line[len(line)-1] == '\n' {
@@ -488,7 +488,7 @@ func TestLegacy(t *testing.T) {
 	}
 }
 
-// UniformOutput is a callback function for use with [ReplaceAttrs]. It replaces the time and process-ID
+// UniformOutput is a callback function for use with [nblog.ReplaceAttr]. It replaces the time and process-ID
 // pseudo-attributes with values that will be the same on every run so that tests can check for predictable output.
 func UniformOutput(groups []string, attr slog.Attr) slog.Attr {
 	if len(groups) == 0 {

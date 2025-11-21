@@ -2,7 +2,6 @@ package nblog
 
 import (
 	"log/slog"
-	"math"
 )
 
 // ReplaceAttrFunc is the type of callback used with [ReplaceAttrs] to allow editing, replacing, or removing of
@@ -30,18 +29,4 @@ func ChainReplace(repl1, repl2 ReplaceAttrFunc) ReplaceAttrFunc {
 	return func(groups []string, a slog.Attr) slog.Attr {
 		return repl2(groups, repl1(groups, a))
 	}
-}
-
-func replaceNumericSeverity(groups []string, attr slog.Attr) slog.Attr {
-	if len(groups) == 0 && attr.Key == slog.LevelKey {
-		leveler, ok := attr.Value.Any().(slog.Leveler)
-		if ok {
-			level := leveler.Level()
-			diff := float64(slog.LevelError - slog.LevelWarn)
-			offset := 1 - float64(slog.LevelDebug)/diff
-			newLevel := math.Pow(2, float64(level)/diff+offset) //revive:disable-line:add-constant
-			attr.Value = slog.Float64Value(newLevel)
-		}
-	}
-	return attr
 }

@@ -6,47 +6,57 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
-func writeField(out *jsonStream, attr slog.Attr) {
-	out.WriteObjectField(attr.Key)
+func writeAttribute(out *jsonStream, h *baseHandler, groups []string, attr slog.Attr) {
+	attr.Value = attr.Value.Resolve()
+	switch attr.Value.Kind() {
+	case slog.KindGroup:
+		writeGroup(out, h, groups, attr)
+	default:
+		write, ok := writeByKind[attr.Value.Kind()]
+		if !ok {
+			panic("No writer found for value")
+		}
+		write(out, attr)
+	}
 }
 
 func writeString(out *jsonStream, attr slog.Attr) {
-	writeField(out, attr)
+	out.WriteObjectField(attr.Key)
 	out.WriteString(attr.Value.String())
 }
 
 func writeInt64(out *jsonStream, attr slog.Attr) {
-	writeField(out, attr)
+	out.WriteObjectField(attr.Key)
 	out.WriteInt64(attr.Value.Int64())
 }
 
 func writeUint64(out *jsonStream, attr slog.Attr) {
-	writeField(out, attr)
+	out.WriteObjectField(attr.Key)
 	out.WriteUint64(attr.Value.Uint64())
 }
 
 func writeFloat64(out *jsonStream, attr slog.Attr) {
-	writeField(out, attr)
+	out.WriteObjectField(attr.Key)
 	out.WriteFloat64(attr.Value.Float64())
 }
 
 func writeBool(out *jsonStream, attr slog.Attr) {
-	writeField(out, attr)
+	out.WriteObjectField(attr.Key)
 	out.WriteBool(attr.Value.Bool())
 }
 
 func writeDuration(out *jsonStream, attr slog.Attr) {
-	writeField(out, attr)
+	out.WriteObjectField(attr.Key)
 	out.WriteString(attr.Value.Duration().String())
 }
 
 func writeTime(out *jsonStream, attr slog.Attr) {
-	writeField(out, attr)
+	out.WriteObjectField(attr.Key)
 	out.WriteString(attr.Value.Time().String())
 }
 
 func writeAny(out *jsonStream, attr slog.Attr) {
-	writeField(out, attr)
+	out.WriteObjectField(attr.Key)
 	out.WriteVal(attr.Value.Any())
 }
 
@@ -54,7 +64,7 @@ func writeLogValuer(*jsonStream, slog.Attr) {
 	panic("Unexpected use of LogValuer instead of Value.Resolve")
 }
 
-func writeGroup(out *jsonStream, h *Handler, groups []string, attr slog.Attr) {
+func writeGroup(out *jsonStream, base *baseHandler, groups []string, attr slog.Attr) {
 	if attr.Key != "" {
 		out.WriteObjectField(attr.Key)
 		out.WriteObjectStart()
@@ -62,7 +72,7 @@ func writeGroup(out *jsonStream, h *Handler, groups []string, attr slog.Attr) {
 		defer out.WriteObjectEnd()
 	}
 	for _, at := range attr.Value.Group() {
-		_ = writeNextAttribute(at, out, h, groups)
+		_ = base.writeNextAttribute(at, out, groups)
 	}
 }
 

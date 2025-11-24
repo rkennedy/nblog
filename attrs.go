@@ -4,11 +4,11 @@ import (
 	"log/slog"
 )
 
-// ReplaceAttrFunc is the type of callback used with [ReplaceAttrs] to allow editing, replacing, or removing of
-// attributes nefore a log record is recorded. The function will be called for each non-group attribute, along with a
-// list of the currently nested groups. The function can return the original attribute to log it as-is, return a
-// different attribute to use it instead, or return an attribute with an empty Key value to omit the current attribute
-// entirely.
+// ReplaceAttrFunc is the type of callback used to allow editing, replacing, or removing of attributes before a log
+// record is recorded. See [slog.HandlerOptions.ReplaceAttr]. The function will be called for each non-group attribute,
+// along with a list of the currently nested groups. The function can return the original attribute to log it as-is,
+// return a different attribute to use instead, or return an attribute with empty Key and Value values to omit the
+// current attribute entirely.
 type ReplaceAttrFunc func(groups []string, attr slog.Attr) slog.Attr
 
 // ChainReplace combines two attribute-replacement functions to call them in sequence, passing the result of one as the

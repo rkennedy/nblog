@@ -1,4 +1,4 @@
-module github.com/rkennedy/nblog
+module sweetkennedy.net/nblog
 
 go 1.24.0
 

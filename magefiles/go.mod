@@ -1,4 +1,4 @@
-module github.com/rkennedy/nblog/magefiles
+module sweetkennedy.net/nblog/magefiles
 
 go 1.25
 

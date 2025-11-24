@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/rkennedy/nblog"
+	"sweetkennedy.net/nblog"
 )
 
 func ExampleLevel() {
@@ -43,7 +43,7 @@ func ExampleUseFullCallerName_true() {
 	logger.Info("info")
 
 	// Output:
-	// 15:04:05.000 [42] <INFO> github.com/rkennedy/nblog_test.ExampleUseFullCallerName_true: info
+	// 15:04:05.000 [42] <INFO> sweetkennedy.net/nblog_test.ExampleUseFullCallerName_true: info
 }
 
 func ExampleUseFullCallerName_false() {

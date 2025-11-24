@@ -13,14 +13,14 @@ import (
 
 	"github.com/MakeNowJust/heredoc/v2"
 	. "github.com/onsi/gomega"
-	"github.com/rkennedy/nblog"
+	"sweetkennedy.net/nblog"
 )
 
 const (
 	FullTimestampRegex = `\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}`
 	TimeOnlyRegex      = `\d{2}:\d{2}:\d{2}\.\d{3}`
 	PidRegex           = `\d+`
-	ThisPackage        = "github.com/rkennedy/nblog_test"
+	ThisPackage        = "sweetkennedy.net/nblog_test"
 )
 
 // MockWriter is a writer that discards its input and instead merely counts the calls to its Write method.

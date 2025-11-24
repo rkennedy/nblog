@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	. "github.com/onsi/gomega"
-	"github.com/rkennedy/nblog"
+	"sweetkennedy.net/nblog"
 )
 
 func repl1(_ /* groups */ []string, a slog.Attr) slog.Attr {

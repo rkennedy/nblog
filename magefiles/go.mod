@@ -5,8 +5,8 @@ go 1.25
 require (
 	github.com/magefile/mage v1.15.0
 	github.com/mgechev/revive v1.13.0
-	github.com/rkennedy/magehelper v0.0.0-20251109231914-714aa1139178
 	golang.org/x/tools v0.39.0
+	sweetkennedy.net/magehelper v0.1.0
 )
 
 require (
@@ -23,7 +23,7 @@ require (
 	golang.org/x/mod v0.30.0 // indirect
 	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/telemetry v0.0.0-20251112162317-03ef243c208a // indirect
+	golang.org/x/telemetry v0.0.0-20251124170345-55bbf377f459 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -278,16 +278,27 @@ func writeCaller(out *jsonStream, h *baseHandler, rec slog.Record) {
 		return
 	}
 
-	frames := runtime.CallersFrames([]uintptr{rec.PC})
+	sourceAttr := h.replaceAttrs([]string{}, slog.Any(slog.SourceKey, rec.PC))
+	if sourceAttr.Equal(slog.Attr{}) {
+		return
+	}
+
+	// slog.AnyValue converts uintptr to uint64.
+	pc := sourceAttr.Value.Uint64()
+	frames := runtime.CallersFrames([]uintptr{uintptr(pc)})
 	frame, _ := frames.Next()
-	who := frame.Function
+	who := h.functionName(frame.Function)
+	out.WriteRaw(who + ": ")
+}
+
+func (h *baseHandler) functionName(who string) string {
 	if !h.useFullCallerName {
 		lastDot := strings.LastIndex(who, ".")
 		if lastDot >= 0 {
 			who = who[lastDot+1:]
 		}
 	}
-	out.WriteRaw(who + ": ")
+	return who
 }
 
 func writeMessage(out *jsonStream, h *baseHandler, rec slog.Record) {

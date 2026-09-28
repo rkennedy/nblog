@@ -306,6 +306,29 @@ func TestRemoveAttr(t *testing.T) {
 	))
 }
 
+func TestRemoveCaller(t *testing.T) {
+	t.Parallel()
+	g := NewWithT(t)
+
+	repl := func(_ /* groups */ []string, attr slog.Attr) slog.Attr {
+		if attr.Key == slog.SourceKey {
+			return slog.Attr{}
+		}
+		return attr
+	}
+	output := &LineBuffer{}
+	h := nblog.New(output,
+		nblog.ReplaceAttr(repl),
+	)
+	logger := slog.New(h)
+
+	logger.Info("message")
+
+	g.Expect(output.Lines).To(HaveEach(
+		HaveSuffix("<INFO> message"),
+	))
+}
+
 // TestReplaceTimeField tests replacement of the timestamp field in log records. It defines a replacement function that
 // looks for the special timestamp sentinel and returns an attribute with the replacement value. The timestamp field
 // comes first in the output message, so the test checks that the output has the expected value as a _prefix_.

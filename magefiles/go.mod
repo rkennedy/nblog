@@ -1,6 +1,6 @@
 module sweetkennedy.net/nblog/magefiles
 
-go 1.25
+go 1.27
 
 require (
 	github.com/magefile/mage v1.15.0

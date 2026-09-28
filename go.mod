@@ -1,6 +1,6 @@
 module sweetkennedy.net/nblog
 
-go 1.24.0
+go 1.27
 
 require (
 	github.com/MakeNowJust/heredoc/v2 v2.0.1

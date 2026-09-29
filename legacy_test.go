@@ -112,7 +112,6 @@ func TestAttributeTypes(t *testing.T) {
 	}
 
 	for _, pair := range attrs {
-		pair := pair
 		t.Run(pair.Attr.Key, func(t *testing.T) {
 			t.Parallel()
 			g := NewWithT(t)
@@ -171,8 +170,6 @@ func TestConstantLevelFiltering(t *testing.T) {
 	}
 
 	for _, lev := range levels {
-		lev := lev
-
 		t.Run(lev.Level.String(), func(t *testing.T) {
 			t.Parallel()
 			g := NewWithT(t)
